@@ -1,0 +1,30 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_URL: https://vcdTech:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/vcdTech/ClusterSurveyAi
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN secret is not configured."
+            exit 1
+          fi
+
+          git remote remove space 2>/dev/null || true
+          git remote add space "$HF_SPACE_URL"
+          git push space HEAD:main --force

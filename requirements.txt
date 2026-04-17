@@ -1,0 +1,12 @@
+dash>=2.18.0
+dash-bootstrap-components[icons]>=1.6.0
+plotly>=5.20.0
+pandas>=2.0.0
+numpy>=1.24.0
+openai>=1.0.0
+umap-learn>=0.5.6
+hdbscan>=0.8.33
+scikit-learn>=1.3.0
+sqlalchemy>=2.0.0
+python-dotenv>=1.0.0
+diskcache>=5.6.0
