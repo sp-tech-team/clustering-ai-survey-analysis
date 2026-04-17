@@ -1,3 +1,12 @@
+---
+title: SurveyAi
+emoji: "📊"
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # Survey Cluster Analysis
 
 An interactive Dash app for clustering open-ended survey responses with OpenAI embeddings, UMAP, HDBSCAN, and an editable review workflow.
