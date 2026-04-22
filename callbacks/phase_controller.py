@@ -28,6 +28,21 @@ _N = no_update
 _NOOP = (_N,) * 13   # len must match output count below
 
 
+def _compute_llm_filter_threshold(lengths: list[int], fallback: int, percentile: int,
+                                  min_chars: int, max_chars: int,
+                                  min_samples: int) -> int:
+    if len(lengths) < min_samples:
+        return fallback
+
+    if min(lengths) == max(lengths):
+        return fallback
+
+    import numpy as np
+
+    percentile_value = int(round(float(np.percentile(lengths, percentile))))
+    return max(min_chars, min(max_chars, percentile_value))
+
+
 @callback(
     Output("session-name-display",        "children"),        # 0
     Output("phase-badge-display",         "children"),        # 1
@@ -223,7 +238,12 @@ def _phase1_worker(session_id: str, api_key: str) -> None:
         from core.embedder import get_embeddings
         from core.umap_runner import run_umap
         from core.llm import classify_batch
-        from config import MIN_WORD_COUNT, MIN_CHAR_COUNT, LLM_FILTER_BATCH_SIZE, LLM_FILTER_CHAR_THRESHOLD
+        from config import (
+            MIN_WORD_COUNT, MIN_CHAR_COUNT,
+            LLM_FILTER_BATCH_SIZE, LLM_FILTER_CHAR_THRESHOLD,
+            LLM_FILTER_CHAR_PERCENTILE, LLM_FILTER_CHAR_MIN,
+            LLM_FILTER_CHAR_MAX, LLM_FILTER_MIN_SAMPLES,
+        )
 
         client = OpenAI(api_key=api_key)
         sess   = get_session(session_id)
@@ -243,11 +263,28 @@ def _phase1_worker(session_id: str, api_key: str) -> None:
         tasks.mark_step_done(session_id, "Structural filter", f"{len(low_ids)} removed")
 
         # LLM filter — re-query so structural exclusions are reflected in status
-        # Only send short/ambiguous responses (< LLM_FILTER_CHAR_THRESHOLD chars) to LLM;
+        # Only send short/ambiguous responses below the dynamic threshold to LLM;
         # anything longer is assumed substantive.
         tasks.update_progress(session_id, 15, "LLM quality filter…")
         active = [p for p in get_points(session_id) if p.status == "active"]
-        llm_candidates = [p for p in active if len(p.response_text or "") < LLM_FILTER_CHAR_THRESHOLD]
+        non_empty_lengths = [
+            len((p.response_text or "").strip())
+            for p in active
+            if (p.response_text or "").strip()
+        ]
+        llm_char_threshold = _compute_llm_filter_threshold(
+            lengths=non_empty_lengths,
+            fallback=LLM_FILTER_CHAR_THRESHOLD,
+            percentile=LLM_FILTER_CHAR_PERCENTILE,
+            min_chars=LLM_FILTER_CHAR_MIN,
+            max_chars=LLM_FILTER_CHAR_MAX,
+            min_samples=LLM_FILTER_MIN_SAMPLES,
+        )
+        llm_candidates = [
+            p for p in active
+            if len((p.response_text or "").strip()) < llm_char_threshold
+        ]
+        llm_candidate_count = len(llm_candidates)
         texts  = [p.response_text for p in llm_candidates]
         try:
             llm_low = []
@@ -262,8 +299,16 @@ def _phase1_worker(session_id: str, api_key: str) -> None:
                         llm_low.append(pt.id)
             if llm_low:
                 mark_points_status(session_id, llm_low, "low_info_llm")
-            tasks.update_progress(session_id, 32, f"LLM filter: removed {len(llm_low)} responses")
-            tasks.mark_step_done(session_id, "LLM filter", f"{len(llm_low)} removed")
+            tasks.update_progress(
+                session_id,
+                32,
+                f"LLM filter: threshold {llm_char_threshold} chars, sent {llm_candidate_count} responses, removed {len(llm_low)} responses",
+            )
+            tasks.mark_step_done(
+                session_id,
+                "LLM filter",
+                f"threshold {llm_char_threshold} chars; sent {llm_candidate_count}; {len(llm_low)} removed",
+            )
         except Exception as exc:
             import traceback
             tasks.update_progress(session_id, 32,

@@ -39,8 +39,12 @@ MIN_WORD_COUNT = 1
 MIN_CHAR_COUNT = 4
 
 # ── LLM low-info filter ───────────────────────────────────────────────────────
-LLM_FILTER_CHAR_THRESHOLD = 75
-LLM_FILTER_BATCH_SIZE     = 75
+LLM_FILTER_CHAR_THRESHOLD  = 75   # fallback if dynamic threshold is unstable
+LLM_FILTER_CHAR_PERCENTILE = 30
+LLM_FILTER_CHAR_MIN        = 40
+LLM_FILTER_CHAR_MAX        = 120
+LLM_FILTER_MIN_SAMPLES     = 20
+LLM_FILTER_BATCH_SIZE      = 75
 
 # ── UMAP ─────────────────────────────────────────────────────────────────────
 UMAP_N_COMPONENTS_HIGH = 100     # for clustering
