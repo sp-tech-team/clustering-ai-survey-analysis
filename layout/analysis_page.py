@@ -76,6 +76,7 @@ def analysis_layout(session_id: str) -> html.Div:
                                 # Action buttons
                                 html.Div(id="action-buttons-container",
                                          children=action_buttons(0)),
+                                html.Div(id="clustering-diagnostics-container", className="mt-2"),
                                 html.Hr(className="my-2"),
 
                                 # Cluster list (scrollable)

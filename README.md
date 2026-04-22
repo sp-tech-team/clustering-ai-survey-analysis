@@ -173,6 +173,28 @@ uv add <package>
 uv sync
 ```
 
+## Running Tests
+
+The project uses the Python standard library `unittest` test runner, so no extra test dependency is required.
+
+Run the full core test suite from the project root:
+
+```bash
+uv run python -m unittest discover -s tests -p "test_*.py"
+```
+
+Run a single test module:
+
+```bash
+uv run python -m unittest tests.test_core_clusterer
+```
+
+Run one specific test class:
+
+```bash
+uv run python -m unittest tests.test_core_splitter.CoreSplitterTests
+```
+
 ## Runtime Artifacts
 
 The app creates local runtime data while you work:

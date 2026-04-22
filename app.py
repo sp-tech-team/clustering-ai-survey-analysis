@@ -76,11 +76,8 @@ from callbacks.export import build_export_workbook  # noqa: E402
 
 @server.get("/api/export/<session_id>")
 def export_session_file(session_id: str):
-    secondary_raw = (request.args.get("secondary") or "").strip().lower()
-    include_secondary = secondary_raw in {"1", "true", "yes", "on"}
-
     try:
-        workbook_bytes, filename = build_export_workbook(session_id, include_secondary)
+        workbook_bytes, filename = build_export_workbook(session_id)
     except ValueError:
         abort(404)
 

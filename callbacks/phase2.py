@@ -24,7 +24,8 @@ from db.queries import (
 )
 from core.state import reconstruct
 from config import EMBEDDING_MODEL
-from core.cache import load as cache_get
+from core.cache import load as cache_get, load_membership
+from core.secondary_membership import replay_secondary_memberships
 from utils import cluster_color
 from layout.components import cluster_list_item, action_buttons
 
@@ -36,6 +37,7 @@ from layout.components import cluster_list_item, action_buttons
 @callback(
     Output("cluster-list-container", "children"),
     Output("cluster-count-badge",    "children"),
+    Output("clustering-diagnostics-container", "children"),
     Input("cluster-refresh-store",   "data"),
     State("session-id-store",        "data"),
     State("selection-store",         "data"),
@@ -43,12 +45,12 @@ from layout.components import cluster_list_item, action_buttons
 )
 def render_cluster_list(refresh, session_id, sel_data):
     if not session_id:
-        return "", ""
+        return "", "", ""
 
     clusters = get_clusters(session_id)
     edits    = get_all_edits(session_id)
     if not clusters:
-        return html.P("No clusters yet.", className="text-muted small p-2"), "0"
+        return html.P("No clusters yet.", className="text-muted small p-2"), "0", ""
 
     assignments = get_cluster_assignments(session_id)
     base_labels = np.array([a.cluster_id for a in assignments], dtype=int)
@@ -64,6 +66,8 @@ def render_cluster_list(refresh, session_id, sel_data):
 
     sess = get_session(session_id)
     total_uploaded = sess.n_points if sess else max(len(base_labels), 1)
+    mem_data = load_membership(sess.csv_hash, sess.embedding_model or EMBEDDING_MODEL) if sess else None
+    _, secondary_diagnostics = replay_secondary_memberships(mem_data, edits, state)
 
     # Sort descending by count
     active_ids_sorted = sorted(
@@ -89,6 +93,11 @@ def render_cluster_list(refresh, session_id, sel_data):
     # Footer: outliers + low-info (includes user-excluded clusters)
     all_points   = get_points(session_id)
     n_outliers   = int((state.labels == -1).sum())
+    n_other_themes = sum(
+        int((state.labels == cid).sum())
+        for cid, ci in state.info.items()
+        if cid != -1 and ci.is_active and ci.theme_name == "Other Themes"
+    )
     # Low-info from filtering
     n_low_filter = sum(
         1
@@ -110,6 +119,13 @@ def render_cluster_list(refresh, session_id, sel_data):
              dbc.Badge(f"{n_outliers} ({pct_o}%)", color="light", text_color="dark")],
             style={"padding": "5px 10px"},
         ))
+    if n_other_themes:
+        pct_t = round(100 * n_other_themes / total_uploaded, 1)
+        footer.append(dbc.ListGroupItem(
+            [html.Span("◌ Other Themes", className="text-muted small me-2"),
+             dbc.Badge(f"{n_other_themes} ({pct_t}%)", color="light", text_color="dark")],
+            style={"padding": "5px 10px"},
+        ))
     if n_low_info:
         pct_l = round(100 * n_low_info / total_uploaded, 1)
         footer.append(dbc.ListGroupItem(
@@ -118,7 +134,22 @@ def render_cluster_list(refresh, session_id, sel_data):
             style={"padding": "5px 10px"},
         ))
 
-    return dbc.ListGroup(items + footer, flush=True), str(len(active_ids_sorted))
+    diagnostics_card = dbc.Card(
+        dbc.CardBody([
+            html.Div("Clustering diagnostics", className="fw-semibold small mb-2"),
+            html.Div(f"Assigned: {secondary_diagnostics['assigned_points']} / {secondary_diagnostics['active_points']}", className="small"),
+            html.Div(f"Outliers remaining: {secondary_diagnostics['outliers_remaining']}", className="small"),
+            html.Div(f"Points with secondaries: {secondary_diagnostics['points_with_secondaries']}", className="small"),
+            html.Div(f"Secondary links: {secondary_diagnostics['total_secondary_links']} total, max {secondary_diagnostics['max_secondary_links']} on one point", className="small"),
+            html.Div(
+                f"Membership cache: {secondary_diagnostics['cached_cluster_count']} clusters" if secondary_diagnostics["membership_available"] else "Membership cache unavailable for this session",
+                className="text-muted small mt-1",
+            ),
+        ]),
+        className="border-0 bg-light",
+    )
+
+    return dbc.ListGroup(items + footer, flush=True), str(len(active_ids_sorted)), diagnostics_card
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -583,7 +614,12 @@ def do_split(n, session_id, sel_data, refresh):
 
         next_id = max((k for k in state.info if k >= 0), default=0) + 1
         from core.splitter import split_cluster
-        new_assignments, new_ids = split_cluster(cid, point_indices, umap_high, next_id)
+        new_assignments, new_ids, local_qualifying, local_thresholds = split_cluster(
+            cid,
+            point_indices,
+            umap_high,
+            next_id,
+        )
 
         # LLM summarise new sub-clusters
         from openai import OpenAI
@@ -601,6 +637,11 @@ def do_split(n, session_id, sel_data, refresh):
             "from_id": int(cid),
             "new_assignments": [[int(k), int(v)] for k, v in new_assignments.items()],
             "new_cluster_info": new_cluster_info,
+            "local_qualifying": {
+                str(point_idx): [[int(cluster_id), float(score)] for cluster_id, score in qualifying]
+                for point_idx, qualifying in local_qualifying.items()
+            },
+            "local_thresholds": {str(cluster_id): float(value) for cluster_id, value in local_thresholds.items()},
         }
         log_edit(session_id, "split", payload)
         return (refresh or 0) + 1, "Split done", f"Cluster {cid} split into {len(new_ids)} sub-clusters.", True
@@ -628,6 +669,24 @@ def exclude_cluster(n, session_id, sel_data, refresh):
     if len(selected) != 1:
         return no_update
     log_edit(session_id, "exclude", {"cluster_id": selected[0], "set_to": "low_info"})
+    return (refresh or 0) + 1
+
+
+@callback(
+    Output("cluster-refresh-store","data",     allow_duplicate=True),
+    Input("btn-other-themes",     "n_clicks"),
+    State("session-id-store",     "data"),
+    State("selection-store",      "data"),
+    State("cluster-refresh-store","data"),
+    prevent_initial_call=True,
+)
+def assign_other_themes(n, session_id, sel_data, refresh):
+    if not n or not session_id:
+        return no_update
+    selected = sel_data.get("selected_cluster_ids", []) if sel_data else []
+    if not selected:
+        return no_update
+    log_edit(session_id, "theme", {"cluster_ids": [int(cid) for cid in selected], "theme_name": "Other Themes"})
     return (refresh or 0) + 1
 
 

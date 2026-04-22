@@ -368,7 +368,8 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         from openai import OpenAI
         from core.clusterer import (
             run_hdbscan, extract_representatives, build_base_cluster_list,
-            compute_soft_membership, reassign_outliers_soft,
+            compute_soft_membership, aggregate_membership_by_cluster,
+            compute_cluster_thresholds, assign_clusters_from_scores,
         )
         from core.llm import summarise_all_clusters, summarise_cluster, suggest_merges
         from core.cache import save_membership as cache_save_membership
@@ -408,19 +409,15 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         n_raw_outliers     = int(np.sum(labels == -1))
         tasks.mark_step_done(session_id, "HDBSCAN",
                              f"{n_hdbscan_clusters} clusters, {n_raw_outliers} outliers")
-        membership, mem_cids, mem_thresholds = compute_soft_membership(
+        membership, mem_cids, _ = compute_soft_membership(
             clusterer, labels, unique_clusters
         )
-        # Reassign qualifying outliers to their best primary cluster (pre-merge IDs).
-        labels, _ = reassign_outliers_soft(labels, membership, mem_cids, mem_thresholds)
-        n_reassigned = n_raw_outliers - int(np.sum(labels == -1))
         tasks.mark_step_done(session_id, "Soft membership",
-                             f"{n_reassigned} outliers → clusters")
+                             f"{membership.shape[1]} raw cluster score columns")
 
         tasks.update_progress(session_id, 30, "Extracting representatives…")
-        reps      = extract_representatives(clusterer, labels, umap_high,
-                                            embeddings, unique_clusters)
-        base_list = build_base_cluster_list(labels, unique_clusters)
+        reps = extract_representatives(clusterer, labels, umap_high,
+                                       embeddings, unique_clusters)
 
         # ── LLM-driven auto-merge (before summarisation) ──────────────────────
         tasks.update_progress(session_id, 38, "LLM merge analysis…")
@@ -428,7 +425,7 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
             cid: [idx_to_text[j] for j in reps.get(cid, [])[:5] if j in idx_to_text]
             for cid in unique_clusters if cid != -1
         }
-        counts = {info["cluster_id"]: info["n_points"] for info in base_list}
+        counts = {int(cid): int((labels == cid).sum()) for cid in unique_clusters}
         try:
             merge_result = suggest_merges(
                 client,
@@ -441,7 +438,7 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         except Exception:
             suggested = []
 
-        n_before_merge  = len(base_list)
+        n_before_merge  = len(unique_clusters)
         final_merge_map = {}   # raw_cid → canonical_cid (empty if no merges)
         if suggested:
             # Use union-find to consolidate overlapping merge groups correctly.
@@ -472,22 +469,36 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
             if any(x != c for x, c in final_candidate.items()):
                 final_merge_map = final_candidate
 
-                labels = np.array(
-                    [final_merge_map.get(int(l), int(l)) for l in labels], dtype=int
-                )
+        canonical_labels = np.array(
+            [final_merge_map.get(int(l), int(l)) if int(l) != -1 else -1 for l in labels],
+            dtype=np.int32,
+        )
+        canonical_membership, canonical_cids = aggregate_membership_by_cluster(
+            membership,
+            mem_cids,
+            final_merge_map,
+        )
+        canonical_thresholds = compute_cluster_thresholds(
+            canonical_membership,
+            canonical_labels,
+            canonical_cids,
+        )
+        threshold_min = float(np.min(canonical_thresholds)) if len(canonical_thresholds) else 0.0
+        threshold_median = float(np.median(canonical_thresholds)) if len(canonical_thresholds) else 0.0
+        threshold_max = float(np.max(canonical_thresholds)) if len(canonical_thresholds) else 0.0
+        tasks.mark_step_done(
+            session_id,
+            "Membership thresholds",
+            f"{len(canonical_cids)} clusters; min {threshold_min:.3f}, median {threshold_median:.3f}, max {threshold_max:.3f}",
+        )
 
-                new_base_list = []
-                for info in base_list:
-                    cid       = info["cluster_id"]
-                    canonical = final_merge_map.get(cid, cid)
-                    if canonical != cid:
-                        continue  # absorbed into canonical
-                    merged_count = sum(
-                        s["n_points"] for s in base_list
-                        if final_merge_map.get(s["cluster_id"], s["cluster_id"]) == cid
-                    )
-                    new_base_list.append({**info, "n_points": merged_count})
-                base_list = new_base_list
+        tasks.update_progress(session_id, 41, "Assigning primary and secondary memberships…")
+        labels, qualifying_map = assign_clusters_from_scores(
+            canonical_membership,
+            canonical_cids,
+            canonical_thresholds,
+        )
+        base_list = build_base_cluster_list(labels, [int(cid) for cid in canonical_cids])
 
         n_absorbed = n_before_merge - len(base_list)
         if n_absorbed > 0:
@@ -495,6 +506,16 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
                                  f"{n_absorbed} clusters merged, {len(base_list)} remain")
         else:
             tasks.mark_step_done(session_id, "Auto-merge", "no merges needed")
+
+        n_assigned = int(np.sum(labels != -1))
+        n_with_secondaries = sum(1 for quals in qualifying_map.values() if len(quals) > 1)
+        total_secondary_links = sum(max(len(quals) - 1, 0) for quals in qualifying_map.values())
+        n_outliers_final = int(np.sum(labels == -1))
+        tasks.mark_step_done(
+            session_id,
+            "Unified assignment",
+            f"{n_assigned} assigned, {n_outliers_final} outliers, {n_with_secondaries} points with secondaries, {total_secondary_links} secondary links",
+        )
 
         # ── LLM labelling of (merged) clusters — single batched call ─────────
         import random as _random
@@ -538,43 +559,15 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         assignments = [(pt.id, int(lbl)) for pt, lbl in zip(active_pts_ordered, labels)]
         save_cluster_assignments(session_id, assignments)
 
-        # Persist soft membership matrix (used for outlier reassignment at export).
+        # Persist canonical membership matrix for export replay and edit handling.
         cache_save_membership(
             sess.csv_hash,
-            membership,
-            mem_cids,
-            mem_thresholds,
-            final_merge_map,
+            canonical_membership,
+            canonical_cids,
+            canonical_thresholds,
             embedding_model=embedding_model,
         )
 
-        # Compute and persist centroid-based secondary assignment data.
-        tasks.update_progress(session_id, 94, "Computing centroid thresholds…")
-        named_merged = sorted(set(int(l) for l in labels if int(l) != -1))
-        if named_merged:
-            from core.clusterer import compute_centroid_thresholds
-            from core.cache import save_centroids as cache_save_centroids
-            from config import SECONDARY_CENTROID_PERCENTILE
-            centroids, cent_cids, cent_thresholds = compute_centroid_thresholds(
-                embeddings=embeddings,
-                rep_indices=reps,
-                labels=labels,
-                named_merged_clusters=named_merged,
-                unique_raw_clusters=unique_clusters,
-                merge_map=final_merge_map,
-                percentile=SECONDARY_CENTROID_PERCENTILE,
-            )
-            cache_save_centroids(
-                sess.csv_hash,
-                centroids,
-                cent_cids,
-                cent_thresholds,
-                embedding_model=embedding_model,
-            )
-            tasks.mark_step_done(session_id, "Centroid thresholds",
-                                 f"{len(named_merged)} cluster centroids cached")
-
-        n_outliers_final = int(np.sum(labels == -1))
         tasks.mark_step_done(session_id, "Clusters",
                              f"{len(labelled)} clusters, {n_outliers_final} outliers remaining")
         advance_phase(session_id, 2)

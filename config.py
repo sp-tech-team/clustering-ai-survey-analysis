@@ -63,7 +63,7 @@ N_OUTLIER_SAMPLE  = 2
 # ── Soft / secondary cluster membership ────────────────────────────────────────
 # Percentile of a cluster's primary members' soft scores used as the assignment
 # threshold for that cluster (higher = stricter).
-SECONDARY_MEMBERSHIP_PERCENTILE = 10
+SECONDARY_MEMBERSHIP_PERCENTILE = 5
 # Absolute floor so noise clusters don't get thresholds near 0.
 SECONDARY_MEMBERSHIP_FLOOR      = 0.05
 # ── Centroid cosine secondary assignment ─────────────────────────────────────
@@ -73,6 +73,6 @@ SECONDARY_MEMBERSHIP_FLOOR      = 0.05
 SECONDARY_CENTROID_PERCENTILE   = 75
 # Hard cap: each point gets at most this many secondary cluster assignments
 # (i.e. a point belongs to primary + at most MAX_SECONDARY_CLUSTERS others).
-MAX_SECONDARY_CLUSTERS          = 2
+MAX_SECONDARY_CLUSTERS          = 3
 # ── Dash ──────────────────────────────────────────────────────────────────────
 POLL_INTERVAL_MS = 2000    # background-task polling interval

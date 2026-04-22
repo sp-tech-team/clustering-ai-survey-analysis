@@ -87,12 +87,11 @@ def evict(csv_hash: str, embedding_model: str = EMBEDDING_MODEL) -> None:
         _mem.pop(_cache_id(csv_hash, embedding_model), None)
 
 
-# ── Soft-membership cache (written once in phase 2) ───────────────────────────
+# ── Unified membership cache (written once in phase 2) ───────────────────────
 # Files stored alongside the phase-1 arrays under the same hash directory:
-#   membership.npy          — float32 (n_active, n_named_clusters)
-#   membership_cids.npy     — int32   (n_named_clusters,)  column→cluster_id
-#   membership_thresholds.npy — float64 (n_named_clusters,) per-cluster thresholds
-#   membership_meta.json    — {"merge_map": {str: int}}    initial auto-merge map
+#   membership.npy            — float32 (n_active, n_canonical_clusters)
+#   membership_cids.npy       — int32   (n_canonical_clusters,) column→cluster_id
+#   membership_thresholds.npy — float64 (n_canonical_clusters,) per-cluster thresholds
 
 _MEM_KEYS = ("membership", "membership_cids", "membership_thresholds")
 
@@ -107,7 +106,6 @@ def save_membership(
     membership: np.ndarray,
     cids: np.ndarray,
     thresholds: np.ndarray,
-    merge_map: Dict[int, int],
     embedding_model: str = EMBEDDING_MODEL,
 ) -> None:
     d = _dir(csv_hash, embedding_model)
@@ -115,25 +113,17 @@ def save_membership(
     np.save(d / "membership.npy",            membership.astype(np.float32))
     np.save(d / "membership_cids.npy",       cids.astype(np.int32))
     np.save(d / "membership_thresholds.npy", thresholds.astype(np.float64))
-    meta = {"merge_map": {str(k): int(v) for k, v in merge_map.items()}}
-    (d / "membership_meta.json").write_text(json.dumps(meta))
 
 
 def load_membership(csv_hash: str, embedding_model: str = EMBEDDING_MODEL) -> Optional[Dict]:
-    """Returns dict with keys: membership, cids, thresholds, merge_map."""
+    """Returns dict with keys: membership, cids, thresholds."""
     d = _dir(csv_hash, embedding_model)
     if not membership_exists(csv_hash, embedding_model):
         return None
-    meta_path = d / "membership_meta.json"
-    merge_map = {}
-    if meta_path.exists():
-        raw = json.loads(meta_path.read_text())
-        merge_map = {int(k): int(v) for k, v in raw.get("merge_map", {}).items()}
     return {
         "membership":  np.load(d / "membership.npy"),
         "cids":        np.load(d / "membership_cids.npy"),
         "thresholds":  np.load(d / "membership_thresholds.npy"),
-        "merge_map":   merge_map,
     }
 
 

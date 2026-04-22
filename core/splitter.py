@@ -1,14 +1,12 @@
-"""
-Split a single cluster by re-running HDBSCAN on its points only.
-Returns new assignment mapping + skeleton cluster info (no LLM titles yet).
-"""
+"""Split a single cluster by re-running HDBSCAN locally on its points."""
 
 import numpy as np
 from typing import Dict, List, Tuple
 
 import hdbscan
 
-from config import HDBSCAN_MIN_SAMPLES
+from config import HDBSCAN_MIN_SAMPLES, SECONDARY_MEMBERSHIP_PERCENTILE, SECONDARY_MEMBERSHIP_FLOOR
+from core.clusterer import compute_cluster_thresholds, assign_clusters_from_scores
 
 
 def split_cluster(
@@ -16,14 +14,15 @@ def split_cluster(
     point_indices: List[int],
     umap_high: np.ndarray,
     next_cluster_id: int,
-) -> Tuple[Dict[int, int], List[int]]:
+) -> Tuple[Dict[int, int], List[int], Dict[int, List[Tuple[int, float]]], Dict[int, float]]:
     """
     Re-cluster the points belonging to `cluster_id`.
 
     Returns:
-        assignments : {point_idx: new_cluster_id}  (outliers within the split
-                      are assigned to the largest new sub-cluster)
-        new_ids     : list of new cluster IDs created
+        assignments      : {point_idx: new_cluster_id or -1}
+        new_ids          : list of new cluster IDs created
+        qualifying_map   : {point_idx: [(new_cluster_id, score), ...]}
+        threshold_map    : {new_cluster_id: threshold}
     """
     if len(point_indices) < 4:
         raise ValueError("Cluster too small to split (need ≥ 4 points).")
@@ -37,6 +36,7 @@ def split_cluster(
         metric="euclidean",
         cluster_selection_method="eom",
         gen_min_span_tree=True,
+        prediction_data=True,
     )
     sub_labels = sub_clusterer.fit_predict(sub_emb)
 
@@ -46,15 +46,28 @@ def split_cluster(
     if len(n_named) < 2:
         raise ValueError("HDBSCAN could not find ≥ 2 sub-clusters. Try a larger cluster or different parameters.")
 
+    membership = hdbscan.all_points_membership_vectors(sub_clusterer).astype(np.float32)
+    raw_cids = np.array(n_named, dtype=np.int32)
+    thresholds = compute_cluster_thresholds(
+        membership,
+        sub_labels,
+        raw_cids,
+        percentile=SECONDARY_MEMBERSHIP_PERCENTILE,
+        floor=SECONDARY_MEMBERSHIP_FLOOR,
+    )
+    local_labels, local_qualifying = assign_clusters_from_scores(membership, raw_cids, thresholds)
+
     # Map sub-cluster indices 0, 1, 2… → globally unique IDs
     id_map = {sc: next_cluster_id + i for i, sc in enumerate(n_named)}
-    # Outliers within the split → assigned to the largest sub-cluster
-    largest = max(n_named, key=lambda c: int((sub_labels == c).sum()))
-    id_map[-1] = id_map[largest]
 
     assignments = {
-        point_indices[i]: id_map[int(sub_labels[i])]
+        point_indices[i]: id_map[int(local_labels[i])] if int(local_labels[i]) != -1 else -1
         for i in range(len(point_indices))
     }
+    qualifying_map = {
+        point_indices[i]: [(id_map[int(cid)], score) for cid, score in qualifying]
+        for i, qualifying in local_qualifying.items()
+    }
+    threshold_map = {id_map[int(raw_cid)]: float(thresholds[col_idx]) for col_idx, raw_cid in enumerate(raw_cids)}
     new_ids = list(id_map[c] for c in n_named)
-    return assignments, new_ids
+    return assignments, new_ids, qualifying_map, threshold_map

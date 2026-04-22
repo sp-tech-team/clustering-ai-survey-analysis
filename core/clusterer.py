@@ -135,32 +135,66 @@ def compute_soft_membership(
     return membership.astype(np.float32), cids, thresholds
 
 
-def reassign_outliers_soft(
-    labels: np.ndarray,
+def aggregate_membership_by_cluster(
     membership: np.ndarray,
+    raw_cids: np.ndarray,
+    cluster_map: Dict[int, int] | None = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Collapse raw-cluster membership columns into canonical cluster columns via max."""
+    cluster_map = cluster_map or {}
+    grouped: Dict[int, List[int]] = {}
+    for col_idx, raw_cid in enumerate(raw_cids):
+        canonical_cid = int(cluster_map.get(int(raw_cid), int(raw_cid)))
+        grouped.setdefault(canonical_cid, []).append(col_idx)
+
+    canonical_cids = np.array(sorted(grouped), dtype=np.int32)
+    canonical_scores = np.zeros((membership.shape[0], len(canonical_cids)), dtype=np.float32)
+    for out_col, canonical_cid in enumerate(canonical_cids):
+        source_cols = grouped[int(canonical_cid)]
+        canonical_scores[:, out_col] = membership[:, source_cols].max(axis=1)
+    return canonical_scores, canonical_cids
+
+
+def compute_cluster_thresholds(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    cids: np.ndarray,
+    percentile: int = SECONDARY_MEMBERSHIP_PERCENTILE,
+    floor: float = SECONDARY_MEMBERSHIP_FLOOR,
+) -> np.ndarray:
+    """Compute one threshold per cluster from all current primary members."""
+    thresholds = np.zeros(len(cids), dtype=np.float64)
+    for col_idx, cid in enumerate(cids):
+        primary_mask = labels == int(cid)
+        if primary_mask.sum() > 0:
+            raw_pct = float(np.percentile(scores[primary_mask, col_idx], percentile))
+        else:
+            raw_pct = 1.0
+        thresholds[col_idx] = max(raw_pct, floor)
+    return thresholds
+
+
+def assign_clusters_from_scores(
+    scores: np.ndarray,
     cids: np.ndarray,
     thresholds: np.ndarray,
-) -> Tuple[np.ndarray, Dict[int, int]]:
-    """
-    For each outlier (label == -1), pick the highest-scoring qualifying cluster
-    as its new primary assignment.  Returns (new_labels, reassignment_map) where
-    reassignment_map is {point_index: new_cluster_id}.  If an outlier doesn't
-    qualify for any cluster it keeps label -1.
-    """
-    cid_to_threshold = {int(cids[j]): float(thresholds[j]) for j in range(len(cids))}
-    new_labels   = labels.copy()
-    reassignment: Dict[int, int] = {}
-    for i in np.where(labels == -1)[0]:
-        qualifying = {
-            int(cids[j]): float(membership[i, j])
-            for j in range(len(cids))
-            if float(membership[i, j]) >= cid_to_threshold[int(cids[j])]
-        }
+) -> Tuple[np.ndarray, Dict[int, List[Tuple[int, float]]]]:
+    """Assign each point to its best qualifying cluster and retain all qualifiers."""
+    labels = np.full(scores.shape[0], -1, dtype=np.int32)
+    qualifying_map: Dict[int, List[Tuple[int, float]]] = {}
+
+    for row_idx in range(scores.shape[0]):
+        qualifying = [
+            (int(cids[col_idx]), float(scores[row_idx, col_idx]))
+            for col_idx in range(len(cids))
+            if float(scores[row_idx, col_idx]) >= float(thresholds[col_idx])
+        ]
+        qualifying.sort(key=lambda item: item[1], reverse=True)
         if qualifying:
-            best = max(qualifying, key=qualifying.get)
-            new_labels[i] = best
-            reassignment[int(i)] = best
-    return new_labels, reassignment
+            labels[row_idx] = int(qualifying[0][0])
+            qualifying_map[row_idx] = qualifying
+
+    return labels, qualifying_map
 
 
 # ── Centroid cosine secondary assignment ──────────────────────────────────────

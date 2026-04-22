@@ -7,7 +7,7 @@ Flow:
 """
 
 import io
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -16,16 +16,15 @@ from dash import Input, Output, State, callback, callback_context, no_update
 
 from db.queries import get_session, get_points, get_clusters, get_cluster_assignments, get_all_edits
 from core.state import reconstruct
-from core.cache import load as cache_load, load_centroids
+from core.cache import load as cache_load, load_membership
+from core.secondary_membership import replay_secondary_memberships
 from config import EMBEDDING_MODEL, MAX_SECONDARY_CLUSTERS
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 # ── Open / close modal ────────────────────────────────────────────────────────
 
 @callback(
     Output("modal-export",           "is_open"),
-    Output("export-secondary-check", "value"),
     Input("btn-export",              "n_clicks"),
     Input("export-cancel",           "n_clicks"),
     Input("export-confirm",          "n_clicks"),
@@ -36,27 +35,25 @@ from sklearn.metrics.pairwise import cosine_similarity
 def toggle_export_modal(open_n, cancel_n, confirm_n, is_open, session_id):
     ctx = callback_context
     if not ctx.triggered:
-        return no_update, no_update
+        return no_update
     btn = ctx.triggered[0]["prop_id"].split(".")[0]
     if btn == "btn-export":
-        return True, []
-    return False, no_update
+        return True
+    return False
 
 
 @callback(
     Output("export-confirm",        "href"),
     Input("session-id-store",       "data"),
-    Input("export-secondary-check", "value"),
 )
-def update_export_href(session_id, secondary_check):
+def update_export_href(session_id):
     if not session_id:
         return "#"
 
-    query = urlencode({"secondary": "1" if bool(secondary_check) else "0"})
-    return f"/api/export/{quote(str(session_id), safe='')}?{query}"
+    return f"/api/export/{quote(str(session_id), safe='')}"
 
 
-def build_export_workbook(session_id: str, include_secondary: bool) -> tuple[bytes, str]:
+def build_export_workbook(session_id: str) -> tuple[bytes, str]:
     sess = get_session(session_id)
     if sess is None:
         raise ValueError(f"Unknown session: {session_id}")
@@ -98,41 +95,16 @@ def build_export_workbook(session_id: str, include_secondary: bool) -> tuple[byt
             idxs = idxs[:n]
         return [active_pts[i].response_text for i in idxs]
 
-    # ── Compute secondary assignments via centroid cosine similarity ──────────
-    # secondary_map: point array index -> list of secondary cluster titles
-    secondary_map: dict[int, list[str]] = {}
-    if include_secondary:
-        cent_data = load_centroids(sess.csv_hash, embedding_model)
-        if cent_data is not None and cache is not None:
-            centroids  = cent_data["centroids"]   # (n_clusters, emb_dim) float32
-            cent_cids  = cent_data["cids"]        # (n_clusters,) int32 — canonical phase-2 IDs
-            thresholds = cent_data["thresholds"]  # (n_clusters,) float64
-            embeddings = cache["embeddings"]       # (n_active, emb_dim)
-
-            # Vectorised similarity: (n_points, n_clusters)
-            sim_matrix = cosine_similarity(embeddings, centroids)
-
-            for i in range(len(state.labels)):
-                primary_final = int(state.labels[i])
-
-                # Collect qualifying clusters above threshold, sorted by similarity desc
-                qualifying = []
-                for col_j, cid in enumerate(cent_cids):
-                    cid = int(cid)
-                    if cid == primary_final:
-                        continue
-                    if cid not in state.info or not state.info[cid].is_active:
-                        continue
-                    if float(sim_matrix[i, col_j]) >= float(thresholds[col_j]):
-                        qualifying.append((float(sim_matrix[i, col_j]), cid))
-
-                qualifying.sort(reverse=True)
-                secondaries = [
-                    state.info[cid].title
-                    for _, cid in qualifying[:MAX_SECONDARY_CLUSTERS]
-                ]
-                if secondaries:
-                    secondary_map[i] = secondaries
+    # ── Compute secondary assignments via unified membership replay ───────────
+    # secondary_map: point array index -> list of secondary cluster ids
+    secondary_map: dict[int, list[int]] = {}
+    mem_data = load_membership(sess.csv_hash, embedding_model)
+    secondary_map, _ = replay_secondary_memberships(
+        mem_data,
+        edits,
+        state,
+        max_secondary_clusters=MAX_SECONDARY_CLUSTERS,
+    )
 
     # ── Sheet 1: Responses — 3 columns only ──────────────────────────────────
     # theme column: primary cluster title (+ secondary titles separated by ", ")
@@ -149,8 +121,8 @@ def build_export_workbook(session_id: str, include_secondary: bool) -> tuple[byt
                 theme_val = "no/low response"
             else:
                 primary = ci.title
-                if include_secondary and idx in secondary_map:
-                    all_themes = [primary] + secondary_map[idx]
+                if idx in secondary_map:
+                    all_themes = [primary] + [state.info[cid].title for cid in secondary_map[idx] if cid in state.info]
                 else:
                     all_themes = [primary]
                 theme_val = ", ".join(t for t in all_themes if t)

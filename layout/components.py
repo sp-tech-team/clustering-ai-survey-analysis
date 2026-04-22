@@ -39,6 +39,10 @@ def cluster_list_item(cluster_id: int, title: str, n_points: int,
                       description: str | None = None) -> dbc.ListGroupItem:
     count_badge = dbc.Badge(f"{n_points} ({pct}%)", color="light", text_color="dark",
                             className="ms-auto me-1", style={"fontSize": "0.65rem"})
+    theme_badge = (
+        dbc.Badge(theme_name, color="secondary", className="ms-2", style={"fontSize": "0.6rem"})
+        if theme_name else None
+    )
 
     title_id = {"type": "cluster-title", "index": cluster_id}
     tooltip = dbc.Tooltip(
@@ -55,8 +59,11 @@ def cluster_list_item(cluster_id: int, title: str, n_points: int,
                 className="me-2",
                 style={"display": "inline-block"},
             ),
-            html.Span(title, id=title_id, className="small",
-                      style={"cursor": "help", "borderBottom": "1px dotted #999"}),
+            html.Span([
+                html.Span(title, id=title_id, className="small",
+                          style={"cursor": "help", "borderBottom": "1px dotted #999"}),
+                theme_badge,
+            ]),
             count_badge,
             tooltip,
         ],
@@ -107,6 +114,7 @@ def progress_card(message: str = "Processing…", value: int = 0,
 def action_buttons(n_selected: int = 0) -> html.Div:
     disabled_join  = n_selected < 2
     disabled_other = n_selected != 1
+    disabled_theme = n_selected < 1
 
     return html.Div([
         dbc.Button("Join",        id="btn-join",    color="primary",   size="sm",
@@ -115,6 +123,8 @@ def action_buttons(n_selected: int = 0) -> html.Div:
                    disabled=disabled_other, className="me-1 mb-1"),
         dbc.Button("Low-Info",    id="btn-low-info", color="secondary", size="sm",
                    disabled=disabled_other, className="me-1 mb-1"),
+        dbc.Button("Other Themes", id="btn-other-themes", color="outline-secondary", size="sm",
+                   disabled=disabled_theme, className="me-1 mb-1"),
         dbc.Button("Rename",      id="btn-rename",  color="light",     size="sm",
                    disabled=disabled_other, className="me-1 mb-1"),
     ], className="d-flex flex-wrap gap-1")
@@ -160,21 +170,13 @@ def export_confirm_modal() -> dbc.Modal:
         dbc.ModalHeader(dbc.ModalTitle("Export Clusters")),
         dbc.ModalBody([
             html.P(
-                "Include secondary cluster assignments?",
+                "The exported workbook always includes secondary cluster memberships when they qualify.",
                 className="mb-1",
             ),
             html.P(
-                "Each response will have additional columns listing any other clusters "
-                "it qualifies for based on soft membership scores. "
+                "Primary and secondary memberships are replayed from the unified clustering model. "
                 "This only affects the exported file — the cluster view is unchanged.",
                 className="text-muted small",
-            ),
-            dbc.Checklist(
-                options=[{"label": "Include secondary cluster columns", "value": "yes"}],
-                value=[],
-                id="export-secondary-check",
-                switch=True,
-                className="mt-2",
             ),
         ]),
         dbc.ModalFooter([
