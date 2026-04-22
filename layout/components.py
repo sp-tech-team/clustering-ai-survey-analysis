@@ -179,7 +179,14 @@ def export_confirm_modal() -> dbc.Modal:
         ]),
         dbc.ModalFooter([
             dbc.Button("Cancel",   id="export-cancel",  color="secondary", className="me-2"),
-            dbc.Button("Download", id="export-confirm", color="success"),
+            dbc.Button(
+                "Download",
+                id="export-confirm",
+                color="success",
+                href="#",
+                target="_blank",
+                external_link=True,
+            ),
         ]),
     ], id="modal-export", is_open=False)
 

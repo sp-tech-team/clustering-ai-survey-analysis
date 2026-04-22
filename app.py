@@ -6,6 +6,7 @@ Run with:
 """
 
 import sys
+from io import BytesIO
 from pathlib import Path
 
 # Ensure the dash_app directory is on sys.path regardless of working directory
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import dash
 import dash_bootstrap_components as dbc
 from dash import Dash, html, dcc, Input, Output, State
+from flask import abort, request, send_file
 
 from db.models import init_db
 from layout.upload_page import upload_layout
@@ -50,9 +52,6 @@ app.layout = html.Div([
         disabled=False,   # individual pages manage enabling/disabling
     ),
 
-    # Download component (export)
-    dcc.Download(id="download-csv"),
-
     # Dynamic page content
     html.Div(id="page-content"),
 ])
@@ -70,6 +69,28 @@ def display_page(pathname: str):
         if session_id:
             return analysis_layout(session_id)
     return upload_layout()
+
+
+from callbacks.export import build_export_workbook  # noqa: E402
+
+
+@server.get("/api/export/<session_id>")
+def export_session_file(session_id: str):
+    secondary_raw = (request.args.get("secondary") or "").strip().lower()
+    include_secondary = secondary_raw in {"1", "true", "yes", "on"}
+
+    try:
+        workbook_bytes, filename = build_export_workbook(session_id, include_secondary)
+    except ValueError:
+        abort(404)
+
+    return send_file(
+        BytesIO(workbook_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename,
+        max_age=0,
+    )
 
 
 # ── Register all callbacks (must come AFTER app is defined) ───────────────────

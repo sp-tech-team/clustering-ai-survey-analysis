@@ -1,16 +1,18 @@
-"""Export callback: download labelled Excel workbook (two sheets).
+"""Export callback helpers and modal controls.
 
 Flow:
-  btn-export     -> opens modal-export
-  export-confirm -> computes file + triggers download
-  export-cancel  -> closes modal
+    btn-export     -> opens modal-export
+    export-confirm -> follows attachment URL
+    export-cancel  -> closes modal
 """
 
 import io
+from urllib.parse import quote, urlencode
+
 import numpy as np
 import pandas as pd
 
-from dash import Input, Output, State, callback, callback_context, dcc, no_update
+from dash import Input, Output, State, callback, callback_context, no_update
 
 from db.queries import get_session, get_points, get_clusters, get_cluster_assignments, get_all_edits
 from core.state import reconstruct
@@ -42,19 +44,23 @@ def toggle_export_modal(open_n, cancel_n, confirm_n, is_open, session_id):
 
 
 @callback(
-    Output("download-csv",          "data"),
-    Input("export-confirm",         "n_clicks"),
-    State("session-id-store",       "data"),
-    State("export-secondary-check", "value"),
-    prevent_initial_call=True,
+    Output("export-confirm",        "href"),
+    Input("session-id-store",       "data"),
+    Input("export-secondary-check", "value"),
 )
-def export_excel(n, session_id, secondary_check):
-    if not n or not session_id:
-        return no_update
+def update_export_href(session_id, secondary_check):
+    if not session_id:
+        return "#"
 
-    include_secondary = bool(secondary_check)
+    query = urlencode({"secondary": "1" if bool(secondary_check) else "0"})
+    return f"/api/export/{quote(str(session_id), safe='')}?{query}"
 
-    sess        = get_session(session_id)
+
+def build_export_workbook(session_id: str, include_secondary: bool) -> tuple[bytes, str]:
+    sess = get_session(session_id)
+    if sess is None:
+        raise ValueError(f"Unknown session: {session_id}")
+
     points      = get_points(session_id)
     clusters    = get_clusters(session_id)
     assignments = get_cluster_assignments(session_id)
@@ -219,8 +225,8 @@ def export_excel(n, session_id, secondary_check):
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         df_responses.to_excel(writer, sheet_name="Responses",       index=False)
         df_summary.to_excel(  writer, sheet_name="Cluster Summary", index=False)
-    buf.seek(0)
 
-    filename = f"{sess.session_name.replace(' ', '_')}_clustered.xlsx"
-    return dcc.send_bytes(buf.read(), filename=filename)
+    filename_root = (sess.session_name or "clustered_export").strip().replace(" ", "_")
+    filename = f"{filename_root}_clustered.xlsx"
+    return buf.getvalue(), filename
 
