@@ -144,6 +144,6 @@ def upload_layout() -> html.Div:
         dcc.Store(id="upload-data-store"),   # {headers, nrows, csv_b64}
         dcc.Store(id="sessions-refresh-store", data=0),
         dcc.Store(id="delete-session-target-store", data={}),
-        dcc.Store(id="delete-session-click-store", data=0),
+        dcc.Store(id="delete-session-click-store", data={}),
         dcc.Location(id="redirect-url", refresh=True),
     ])

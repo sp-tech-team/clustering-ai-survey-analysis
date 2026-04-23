@@ -204,13 +204,13 @@ def show_past_sessions(_store, _refresh):
     Output("delete-session-modal-body", "children"),
     Output("delete-session-target-store", "data"),
     Output("delete-session-click-store", "data"),
-    Input({"type": "delete-session-btn", "index": ALL}, "n_clicks_timestamp"),
+    Input({"type": "delete-session-btn", "index": ALL}, "n_clicks"),
     Input("delete-session-cancel", "n_clicks"),
     State({"type": "delete-session-btn", "index": ALL}, "id"),
     State("delete-session-click-store", "data"),
     prevent_initial_call=True,
 )
-def toggle_delete_session_modal(delete_click_timestamps, cancel_clicks, delete_ids, last_handled_ts):
+def toggle_delete_session_modal(delete_clicks, cancel_clicks, delete_ids, last_handled_clicks):
     ctx = callback_context
     if not ctx.triggered:
         return no_update, no_update, no_update, no_update
@@ -223,21 +223,23 @@ def toggle_delete_session_modal(delete_click_timestamps, cancel_clicks, delete_i
         return no_update, no_update, no_update, no_update
 
     session_id = triggered.get("index")
-    if not session_id or not delete_ids or not delete_click_timestamps:
+    if not session_id or not delete_ids or not delete_clicks:
         return no_update, no_update, no_update, no_update
 
-    timestamp_by_session = {
-        id_obj.get("index"): ts
-        for id_obj, ts in zip(delete_ids, delete_click_timestamps)
+    click_count_by_session = {
+        id_obj.get("index"): (count or 0)
+        for id_obj, count in zip(delete_ids, delete_clicks)
         if isinstance(id_obj, dict)
     }
-    click_ts = timestamp_by_session.get(session_id)
-    if click_ts in (None, -1) or click_ts <= (last_handled_ts or 0):
+    click_count = click_count_by_session.get(session_id, 0)
+    handled_clicks = last_handled_clicks or {}
+    if click_count <= handled_clicks.get(session_id, 0):
         return no_update, no_update, no_update, no_update
 
     session = get_session(session_id) if session_id else None
     if not session:
-        return False, "Session not found.", {}, click_ts
+        updated_clicks = {**handled_clicks, session_id: click_count}
+        return False, "Session not found.", {}, updated_clicks
 
     body = html.Div([
         html.P(f'Delete session "{session.session_name}"?'),
@@ -246,7 +248,8 @@ def toggle_delete_session_modal(delete_click_timestamps, cancel_clicks, delete_i
             className="text-muted small mb-0",
         ),
     ])
-    return True, body, {"session_id": session_id}, click_ts
+    updated_clicks = {**handled_clicks, session_id: click_count}
+    return True, body, {"session_id": session_id}, updated_clicks
 
 
 @callback(
