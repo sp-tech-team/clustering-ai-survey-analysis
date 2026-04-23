@@ -149,11 +149,14 @@ Survey question: "{question}"
 
 {clusters_block}
 
-Identify clusters that cover the same or closely related theme and should be merged.
-Merge clusters whenever they address the same underlying idea — even if phrased or approached differently.
-Treat cluster size as important context.
-If a cluster is less than 1% of the total responses, prefer merging it into a larger thematically compatible cluster rather than keeping it standalone.
-Only leave a <1% cluster unmerged if it is clearly distinct and would lose meaning if absorbed.
+Identify only clusters that are effectively the same theme and should be merged.
+Do not merge clusters just because they are adjacent, related, or part of a broader shared topic.
+Only merge when a human reviewer would be comfortable giving the combined cluster one clear title without losing a meaningful distinction.
+If the clusters could reasonably be given different titles, keep them separate.
+When the evidence is ambiguous, prefer no merge.
+Treat cluster size as secondary context, not a reason to merge by itself.
+If a cluster is less than 1% of the total responses, merge it only when it is clearly a narrower phrasing of the same theme already represented elsewhere.
+Only leave a <1% cluster unmerged if it is distinct enough that combining it would hide a useful analytic signal.
 Suggesting zero merges is fine if the clusters are genuinely distinct.
 
 Respond ONLY with valid JSON, no preamble:

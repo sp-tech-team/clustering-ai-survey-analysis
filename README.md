@@ -38,7 +38,8 @@ The current clustering model is intentionally simple:
 - The editable working state is the raw HDBSCAN result after any auto-merges. There is no soft-membership reassignment layer in the live cluster state.
 - User actions such as join, split, rename, exclude, theme assignment, undo, and re-cluster are stored as edits and replayed into the current state.
 - Export runs one separate centroid-based refinement pass over the final edited active clusters using the original cached embeddings.
-- That export-only pass can absorb outliers and add secondary themes, but it does not change the interactive cluster view.
+- That export-only pass can re-check raw residual responses still sitting in `Other Themes` and add secondary themes, but it does not change the interactive cluster view.
+- Clusters manually moved to `Other Themes` are treated as a final user override and are not reconsidered during export.
 
 ## App Flow
 
@@ -85,7 +86,7 @@ flowchart TD
 - Keeps merged HDBSCAN labels as the editable working cluster state.
 - Uses LLM summaries to name and describe clusters.
 - Supports post-cluster editing: join, split, rename, exclude, undo, and re-cluster.
-- Exports results to Excel with an export-only centroid pass for outlier absorption and secondary theme assignment.
+- Exports results to Excel with an export-only centroid pass for raw residual `Other Themes` responses and secondary theme assignment.
 
 ## Project Map
 
@@ -109,7 +110,7 @@ flowchart TD
 - `callbacks/phase_controller.py`: orchestrates phase progression and builds the live working cluster state from HDBSCAN plus auto-merges.
 - `callbacks/export.py`: builds the export workbook and runs the export-only centroid assignment pass.
 - `core/clusterer.py`: HDBSCAN clustering, representative extraction, and centroid threshold helpers.
-- `core/export_centroid.py`: export-only centroid-based outlier absorption and secondary theme assignment.
+- `core/export_centroid.py`: export-only centroid refinement for raw residual `Other Themes` responses and secondary theme assignment.
 - `core/cache.py`: persists and reloads embeddings and UMAP arrays under `cache/`.
 - `db/models.py`: SQLite schema for sessions, points, clusters, assignments, and edit history.
 
@@ -240,7 +241,7 @@ sequenceDiagram
 	User->>DashApp: Review, rename, split, join, exclude
 	DashApp->>DB: Persist edit log
 	User->>DashApp: Export results
-	DashApp->>DashApp: Run centroid refinement for export only
+	DashApp->>DashApp: Run centroid refinement for export only on raw residual Other Themes responses
 ```
 
 ## Notes
@@ -249,3 +250,4 @@ sequenceDiagram
 - The app uses background tasks and interval polling so long-running phases do not block the interface.
 - Export produces an Excel workbook with a response sheet and a cluster summary sheet.
 - The interactive UI and the export workbook intentionally use different assignment layers: live editing uses HDBSCAN plus edits, while export adds a final centroid-based refinement pass.
+- Manual `Other Themes` assignment is terminal until the user changes it again. Export refinement only revisits raw residual responses that still sit in `Other Themes`.

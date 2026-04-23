@@ -149,9 +149,9 @@ def render_export_preview(_refresh, session_id):
         dbc.CardBody([
             html.Div("Export preview", className="fw-semibold small mb-2"),
             html.Div(f"Edited active clusters: {diagnostics['cluster_count']}", className="small"),
-            html.Div(f"Outliers before export: {diagnostics['outliers_before']}", className="small"),
-            html.Div(f"Outliers absorbed at export: {diagnostics['outliers_absorbed']}", className="small"),
-            html.Div(f"Outliers remaining in export: {diagnostics['outliers_after']}", className="small"),
+            html.Div(f"Other Themes before export: {diagnostics['outliers_before']}", className="small"),
+            html.Div(f"Moved out of Other Themes at export: {diagnostics['outliers_absorbed']}", className="small"),
+            html.Div(f"Other Themes remaining in export: {diagnostics['outliers_after']}", className="small"),
             html.Div(f"Points with secondary themes: {diagnostics['points_with_secondaries']}", className="small"),
             html.Div(f"Secondary links: {diagnostics['total_secondary_links']} total, max {diagnostics['max_secondary_links']} on one point", className="small"),
             html.Div(threshold_text, className="text-muted small mt-1"),
@@ -193,19 +193,20 @@ def build_export_workbook(session_id: str) -> tuple[bytes, str]:
 
     # ── Sheet 1: Responses — 3 columns only ──────────────────────────────────
     # theme column: primary cluster title (+ secondary titles separated by ", ")
-    #   outlier  → "Outliers"
+    #   outlier / other-themes bucket → "Other Themes"
     #   any filtered/excluded → "no/low response"
     rows = []
     for idx, pt in enumerate(active_pts):
-        current_label = int(state.labels[idx])
         export_label = int(export_labels[idx])
         is_outlier = export_label == -1
         if is_outlier:
-            theme_val = "Outliers"
+            theme_val = "Other Themes"
         else:
             ci = state.info.get(export_label)
             if ci is None or not ci.is_active:
                 theme_val = "no/low response"
+            elif ci.theme_name == "Other Themes":
+                theme_val = "Other Themes"
             else:
                 primary = ci.title
                 if idx in secondary_map:
@@ -252,9 +253,13 @@ def build_export_workbook(session_id: str) -> tuple[bytes, str]:
         return row
 
     summary_rows = []
+    n_other_themes = int(np.sum(export_labels == -1))
     for cid in sorted(state.active_ids,
                       key=lambda c: int((export_labels == c).sum()), reverse=True):
         ci    = state.info.get(cid)
+        if ci and ci.theme_name == "Other Themes":
+            n_other_themes += int((export_labels == cid).sum())
+            continue
         n     = int((export_labels == cid).sum())
         if n == 0:
             continue
@@ -267,11 +272,10 @@ def build_export_workbook(session_id: str) -> tuple[bytes, str]:
             reps        = reps,
         ))
 
-    n_outliers = int((export_labels == -1).sum())
-    if n_outliers:
+    if n_other_themes:
         summary_rows.append(_summary_row(
-            title="Outliers", description="Responses not assigned to any cluster",
-            count=n_outliers, pct=round(100 * n_outliers / total_uploaded, 1), reps=[],
+            title="Other Themes", description="Responses left in the other themes bucket after export refinement",
+            count=n_other_themes, pct=round(100 * n_other_themes / total_uploaded, 1), reps=[],
         ))
 
     excluded_cids = {cid for cid, ci in state.info.items() if not ci.is_active and cid != -1}

@@ -39,8 +39,8 @@ class CoreStateTests(unittest.TestCase):
                     "from_id": 5,
                     "new_assignments": [[0, 10], [1, 10], [2, 11], [3, 11]],
                     "new_cluster_info": {
-                        "10": {"title": "Left", "description": "", "sentiment": "neutral"},
-                        "11": {"title": "Right", "description": "", "sentiment": "neutral"},
+                        "10": {"title": "Left", "description": "", "sentiment": "neutral", "theme_name": "Split from Original"},
+                        "11": {"title": "Right", "description": "", "sentiment": "neutral", "theme_name": "Split from Original"},
                     },
                 },
             )
@@ -52,3 +52,5 @@ class CoreStateTests(unittest.TestCase):
         self.assertEqual(state.labels.tolist(), [10, 10, 11, 11])
         self.assertEqual(state.info[10].n_points, 2)
         self.assertEqual(state.info[11].n_points, 2)
+        self.assertEqual(state.info[10].theme_name, "Split from Original")
+        self.assertEqual(state.info[11].theme_name, "Split from Original")

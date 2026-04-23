@@ -402,7 +402,7 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         n_hdbscan_clusters = len(unique_clusters)
         n_raw_outliers     = int(np.sum(labels == -1))
         tasks.mark_step_done(session_id, "HDBSCAN",
-                             f"{n_hdbscan_clusters} clusters, {n_raw_outliers} outliers")
+                             f"{n_hdbscan_clusters} clusters, {n_raw_outliers} other-themes points")
 
         tasks.update_progress(session_id, 30, "Extracting representatives…")
         reps = extract_representatives(clusterer, labels, umap_high,
@@ -478,7 +478,7 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         tasks.mark_step_done(
             session_id,
             "Working state",
-            f"{n_assigned} assigned, {n_outliers_final} outliers, {len(base_list)} active clusters",
+            f"{n_assigned} assigned, {n_outliers_final} other-themes points, {len(base_list)} active clusters",
         )
 
         # ── LLM labelling of (merged) clusters — single batched call ─────────
@@ -524,7 +524,7 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         save_cluster_assignments(session_id, assignments)
 
         tasks.mark_step_done(session_id, "Clusters",
-                             f"{len(labelled)} clusters, {n_outliers_final} outliers remaining")
+                             f"{len(labelled)} clusters, {n_outliers_final} other-themes points")
         advance_phase(session_id, 2)
         tasks.mark_done(session_id, {"phase": 2})
 

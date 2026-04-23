@@ -20,7 +20,10 @@ class Phase2CallbackTests(unittest.TestCase):
         ]
         assignments = [SimpleNamespace(point_id=i, cluster_id=7) for i in range(1, 7)]
         clusters = [SimpleNamespace(cluster_id=7, title="Cluster 7", description="", sentiment="neutral", theme_name=None, n_points=6, is_active=True)]
-        fake_state = SimpleNamespace(labels=np.array([7, 7, 7, 7, 7, 7], dtype=np.int32), info={7: object()})
+        fake_state = SimpleNamespace(
+            labels=np.array([7, 7, 7, 7, 7, 7], dtype=np.int32),
+            info={7: SimpleNamespace(title="Cluster 7")},
+        )
         split_result = (
             {0: 100, 1: 100, 2: 100, 3: 101, 4: 101, 5: 101},
             [100, 101],
@@ -47,6 +50,7 @@ class Phase2CallbackTests(unittest.TestCase):
         payload = log_edit.call_args.args[2]
         self.assertEqual(payload["new_assignments"][0], [0, 100])
         self.assertNotIn("local_qualifying", payload)
+        self.assertEqual(payload["new_cluster_info"]["100"]["theme_name"], "Split from Cluster 7")
 
     def test_do_split_requires_exactly_one_cluster(self):
         refresh, title, message, is_open = do_split(1, "session-1", {"selected_cluster_ids": [1, 2]}, 0)
@@ -85,7 +89,7 @@ class Phase2CallbackTests(unittest.TestCase):
             info={
                 7: SimpleNamespace(theme_name="Other Themes", is_active=True, title="Cluster 7", description=""),
                 8: SimpleNamespace(theme_name=None, is_active=True, title="Cluster 8", description=""),
-                -1: SimpleNamespace(theme_name=None, is_active=True, title="Outliers", description=""),
+                -1: SimpleNamespace(theme_name=None, is_active=True, title="Other Themes", description=""),
             },
             active_ids=[7, 8],
         )
@@ -100,9 +104,9 @@ class Phase2CallbackTests(unittest.TestCase):
             list_group, count_badge, _ = render_cluster_list(1, "session-1", {"selected_cluster_ids": []})
 
         footer_labels = []
-        for item in list_group.children[2:]:
+        for item in list_group.children[1:]:
             label_span = item.children[0]
             footer_labels.append(label_span.children)
 
-        self.assertEqual(count_badge, "2")
+        self.assertEqual(count_badge, "1")
         self.assertIn("◌ Other Themes", footer_labels)

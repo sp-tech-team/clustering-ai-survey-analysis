@@ -44,7 +44,13 @@ def compute_export_centroid_assignments(
         "threshold_max": None,
     }
 
-    active_cids = [cid for cid in state.active_ids if cid in state.info and state.info[cid].is_active]
+    active_cids = [
+        cid
+        for cid in state.active_ids
+        if cid in state.info
+        and state.info[cid].is_active
+        and getattr(state.info[cid], "theme_name", None) != "Other Themes"
+    ]
     diagnostics["cluster_count"] = int(len(active_cids))
     if embeddings is None or len(active_cids) == 0 or embeddings.shape[0] != len(labels):
         return export_labels, secondary_map, diagnostics

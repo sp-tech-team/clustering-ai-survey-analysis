@@ -64,7 +64,7 @@ N_OUTLIER_SAMPLE  = 2
 # Percentile of primary members' cosine similarity to cluster centroid used as
 # assignment threshold. Higher = stricter (fewer secondary assignments). 75 is
 # conservative — only points well within the cluster's similarity range qualify.
-SECONDARY_CENTROID_PERCENTILE   = 75
+SECONDARY_CENTROID_PERCENTILE   = 85
 EXPORT_CENTROID_THRESHOLD_MARGIN = 0.05
 # Hard cap: each point gets at most this many secondary cluster assignments
 # (i.e. a point belongs to primary + at most MAX_SECONDARY_CLUSTERS others).

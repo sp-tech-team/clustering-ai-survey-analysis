@@ -29,6 +29,16 @@ from utils import cluster_color
 from layout.components import cluster_list_item, action_buttons
 
 
+def _is_other_themes_cluster(state, cid: int) -> bool:
+    ci = state.info.get(int(cid))
+    return bool(ci and ci.is_active and ci.theme_name == "Other Themes")
+
+
+def _is_other_themes_point(state, point_idx: int) -> bool:
+    cid = int(state.labels[point_idx])
+    return cid == -1 or _is_other_themes_cluster(state, cid)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Render cluster list
 # ─────────────────────────────────────────────────────────────────────────────
@@ -67,8 +77,9 @@ def render_cluster_list(refresh, session_id, sel_data):
     total_uploaded = sess.n_points if sess else max(len(base_labels), 1)
 
     # Sort descending by count
+    visible_active_ids = [cid for cid in state.active_ids if not _is_other_themes_cluster(state, cid)]
     active_ids_sorted = sorted(
-        state.active_ids,
+        visible_active_ids,
         key=lambda cid: int((state.labels == cid).sum()),
         reverse=True,
     )
@@ -87,13 +98,12 @@ def render_cluster_list(refresh, session_id, sel_data):
             description=ci.description if ci else None,
         ))
 
-    # Footer: outliers + low-info (includes user-excluded clusters)
+    # Footer: other themes + low-info (includes user-excluded clusters)
     all_points   = get_points(session_id)
-    n_outliers   = int((state.labels == -1).sum())
     n_other_themes = sum(
-        int((state.labels == cid).sum())
-        for cid, ci in state.info.items()
-        if cid != -1 and ci.is_active and ci.theme_name == "Other Themes"
+        1
+        for point_idx in range(len(state.labels))
+        if _is_other_themes_point(state, point_idx)
     )
     # Low-info from filtering
     n_low_filter = sum(
@@ -109,13 +119,6 @@ def render_cluster_list(refresh, session_id, sel_data):
     n_low_info   = n_low_filter + n_excluded
 
     footer = []
-    if n_outliers:
-        pct_o = round(100 * n_outliers / total_uploaded, 1)
-        footer.append(dbc.ListGroupItem(
-            [html.Span("○ Outliers", className="text-muted small me-2"),
-             dbc.Badge(f"{n_outliers} ({pct_o}%)", color="light", text_color="dark")],
-            style={"padding": "5px 10px"},
-        ))
     if n_other_themes:
         pct_t = round(100 * n_other_themes / total_uploaded, 1)
         footer.append(dbc.ListGroupItem(
@@ -259,6 +262,8 @@ def _render_scatter_inner(session_id, sel_data):
 
     traces = []
     for cid in active_ids:
+        if _is_other_themes_cluster(state, cid):
+            continue
         ci = state.info.get(cid)
         color = cluster_color(cid, active_ids)
         opacity = 1.0 if not selected or cid in selected else 0.05
@@ -289,17 +294,26 @@ def _render_scatter_inner(session_id, sel_data):
             ),
         ))
 
-    # Outliers
-    outlier_mask = state.labels == -1
-    if outlier_mask.any():
-        idxs = np.where(outlier_mask)[0]
+    other_themes_idxs = [idx for idx in range(len(state.labels)) if _is_other_themes_point(state, idx)]
+    if other_themes_idxs:
+        idxs = np.array(other_themes_idxs, dtype=np.int32)
         coords = umap_3d[idxs]
+        pt_subset = [active_points_ordered[int(idx)] for idx in idxs]
+        custom = [
+            [p.response_text[:120], p.orig_id, "Other Themes", p.response_text, int(idx)]
+            for idx, p in zip(idxs, pt_subset)
+        ]
         traces.append(go.Scatter3d(
-            name="Outliers",
+            name="Other Themes",
             x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
             mode="markers",
             marker=dict(size=2, color="#adb5bd", opacity=0.3),
-            hoverinfo="skip",
+            customdata=custom,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "ID: %{customdata[1]}<br>"
+                "Cluster: %{customdata[2]}<extra></extra>"
+            ),
         ))
 
     fig = go.Figure(traces)
@@ -416,7 +430,7 @@ def show_point_detail(sel_data, session_id):
     point = active_points_ordered[point_idx]
     cid = int(state.labels[point_idx])
     ci = state.info.get(cid)
-    cluster_label = ci.title if ci else ("Outliers" if cid == -1 else f"Cluster {cid}")
+    cluster_label = "Other Themes" if _is_other_themes_point(state, point_idx) else (ci.title if ci else f"Cluster {cid}")
     return point.response_text, f"ID: {point.orig_id}", f"Cluster: {cluster_label}", bool(point.response_text)
 
 
@@ -589,6 +603,9 @@ def do_split(n, session_id, sel_data, refresh):
                                        "n_points": c.n_points, "is_active": c.is_active}
                         for c in clusters}
         state = reconstruct(base_labels, base_info, edits)
+        source_cluster = state.info.get(int(cid))
+        source_title = source_cluster.title if source_cluster else f"Cluster {cid}"
+        split_tag = f"Split from {source_title}"
 
         point_indices = list(np.where(state.labels == cid)[0])
         if len(point_indices) < 6:
@@ -613,6 +630,7 @@ def do_split(n, session_id, sel_data, refresh):
             idxs = [pt_idx for pt_idx, assigned_cid in new_assignments.items() if assigned_cid == ncid]
             texts = [active_pts_ordered[i].response_text for i in idxs[:10] if i < len(active_pts_ordered)]
             info  = summarise_cluster(client, texts)
+            info["theme_name"] = split_tag
             new_cluster_info[str(ncid)] = info
 
         payload = {

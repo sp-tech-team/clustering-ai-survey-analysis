@@ -107,7 +107,7 @@ class ClusterState:
                 description=ci_dict.get("description", ""),
                 sentiment=ci_dict.get("sentiment", "unknown"),
                 n_points=int((self.labels == cid).sum()),
-                theme_name=None,
+                theme_name=ci_dict.get("theme_name"),
                 is_active=True,
             )
             self._next_id = max(self._next_id, cid + 1)
@@ -164,12 +164,12 @@ class ClusterState:
                 "sentiment":   ci.sentiment,
                 "theme_name":  ci.theme_name,
             })
-        # Outliers last
+        # Other Themes bucket last
         if -1 in self.info and self.info[-1].is_active:
             ci = self.info[-1]
             items.append({
                 "cluster_id":  -1,
-                "title":       "Outliers / Ungrouped",
+                "title":       "Other Themes",
                 "n_points":    ci.n_points,
                 "sentiment":   "neutral",
                 "theme_name":  None,

@@ -124,7 +124,8 @@ def action_buttons(n_selected: int = 0) -> html.Div:
         dbc.Button("Low-Info",    id="btn-low-info", color="secondary", size="sm",
                    disabled=disabled_other, className="me-1 mb-1"),
         dbc.Button("Other Themes", id="btn-other-themes", color="outline-secondary", size="sm",
-                   disabled=disabled_theme, className="me-1 mb-1"),
+                   disabled=disabled_theme, className="me-1 mb-1",
+                   title="Manual assignment. Clusters moved to Other Themes stay there on export unless you change them again."),
         dbc.Button("Rename",      id="btn-rename",  color="light",     size="sm",
                    disabled=disabled_other, className="me-1 mb-1"),
     ], className="d-flex flex-wrap gap-1")
@@ -174,8 +175,12 @@ def export_confirm_modal() -> dbc.Modal:
                 className="mb-1",
             ),
             html.P(
-                "Current primary clusters stay fixed. This export-only pass can absorb outliers and add secondary themes when they clear each cluster's similarity threshold.",
+                "Current primary clusters stay fixed. This export-only pass can re-check raw residual responses currently sitting in Other Themes and add secondary themes when they clear each cluster's similarity threshold.",
                 className="text-muted small",
+            ),
+            html.P(
+                "Clusters you manually moved to Other Themes are treated as final and are not reconsidered during export.",
+                className="text-muted small mb-0",
             ),
             html.Div(id="export-preview-content", className="mt-3"),
         ]),

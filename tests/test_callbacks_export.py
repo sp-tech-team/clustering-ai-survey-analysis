@@ -91,7 +91,7 @@ class ExportCallbackTests(unittest.TestCase):
         ]
         clusters = [
             SimpleNamespace(cluster_id=10, title="Theme A", description="", sentiment="neutral", theme_name=None, n_points=2, is_active=True),
-            SimpleNamespace(cluster_id=-1, title="Outliers", description="", sentiment="neutral", theme_name=None, n_points=1, is_active=True),
+            SimpleNamespace(cluster_id=-1, title="Other Themes", description="", sentiment="neutral", theme_name=None, n_points=1, is_active=True),
         ]
         assignments = [
             SimpleNamespace(point_id=1, cluster_id=10),
@@ -185,7 +185,7 @@ class ExportCallbackTests(unittest.TestCase):
             embedding_model="model",
         )
         points = [SimpleNamespace(id=1, orig_id="1", response_text="orphan", status="active")]
-        clusters = [SimpleNamespace(cluster_id=-1, title="Outliers", description="", sentiment="neutral", theme_name=None, n_points=1, is_active=True)]
+        clusters = [SimpleNamespace(cluster_id=-1, title="Other Themes", description="", sentiment="neutral", theme_name=None, n_points=1, is_active=True)]
         assignments = [SimpleNamespace(point_id=1, cluster_id=-1)]
         cache_data = {
             "point_ids": np.array([1], dtype=np.int32),
@@ -202,4 +202,59 @@ class ExportCallbackTests(unittest.TestCase):
             workbook_bytes, _ = build_export_workbook("session-3")
 
         responses = pd.read_excel(io.BytesIO(workbook_bytes), sheet_name="Responses")
-        self.assertEqual(responses.loc[0, "theme"], "Outliers")
+        self.assertEqual(responses.loc[0, "theme"], "Other Themes")
+
+    def test_build_export_workbook_excludes_other_themes_cluster_from_export_candidates(self):
+        session = SimpleNamespace(
+            session_id="session-5",
+            session_name="DemoOtherThemes",
+            id_col="id",
+            response_col="response",
+            n_points=3,
+            csv_hash="hash567",
+            embedding_model="model",
+        )
+        points = [
+            SimpleNamespace(id=1, orig_id="1", response_text="keep me", status="active"),
+            SimpleNamespace(id=2, orig_id="2", response_text="other one", status="active"),
+            SimpleNamespace(id=3, orig_id="3", response_text="other two", status="active"),
+        ]
+        clusters = [
+            SimpleNamespace(cluster_id=10, title="Theme A", description="", sentiment="neutral", theme_name=None, n_points=1, is_active=True),
+            SimpleNamespace(cluster_id=20, title="Hidden Theme", description="", sentiment="neutral", theme_name="Other Themes", n_points=2, is_active=True),
+        ]
+        assignments = [
+            SimpleNamespace(point_id=1, cluster_id=10),
+            SimpleNamespace(point_id=2, cluster_id=20),
+            SimpleNamespace(point_id=3, cluster_id=20),
+        ]
+        cache_data = {
+            "point_ids": np.array([1, 2, 3], dtype=np.int32),
+            "embeddings": np.array(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [0.0, 0.95],
+                ],
+                dtype=np.float32,
+            ),
+            "umap_3d": np.zeros((3, 3), dtype=np.float32),
+        }
+
+        with mock.patch("callbacks.export.get_session", return_value=session), \
+             mock.patch("callbacks.export.get_points", return_value=points), \
+             mock.patch("callbacks.export.get_clusters", return_value=clusters), \
+             mock.patch("callbacks.export.get_cluster_assignments", return_value=assignments), \
+             mock.patch("callbacks.export.get_all_edits", return_value=[]), \
+             mock.patch("callbacks.export.cache_load", return_value=cache_data):
+            workbook_bytes, _ = build_export_workbook("session-5")
+            preview = build_export_preview("session-5")
+
+        responses = pd.read_excel(io.BytesIO(workbook_bytes), sheet_name="Responses")
+        self.assertEqual(responses.loc[1, "theme"], "Other Themes")
+        self.assertEqual(responses.loc[2, "theme"], "Other Themes")
+
+        summary = pd.read_excel(io.BytesIO(workbook_bytes), sheet_name="Cluster Summary")
+        self.assertNotIn("Hidden Theme", summary["theme"].tolist())
+        self.assertIn("Other Themes", summary["theme"].tolist())
+        self.assertEqual(preview["cluster_count"], 1)
