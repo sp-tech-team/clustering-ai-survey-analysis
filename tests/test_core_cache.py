@@ -33,20 +33,6 @@ class CoreCacheTests(unittest.TestCase):
         for key, expected in arrays.items():
             np.testing.assert_array_equal(loaded[key], expected)
 
-    def test_save_and_load_membership_round_trip(self):
-        membership = np.array([[0.8, 0.2], [0.4, 0.7]], dtype=np.float32)
-        cids = np.array([10, 20], dtype=np.int32)
-        thresholds = np.array([0.5, 0.6], dtype=np.float64)
-
-        with mock.patch.object(cache, "_dir", return_value=self.cache_dir):
-            cache.save_membership("abc", membership, cids, thresholds, embedding_model="model")
-            loaded = cache.load_membership("abc", embedding_model="model")
-
-        self.assertIsNotNone(loaded)
-        np.testing.assert_array_equal(loaded["membership"], membership)
-        np.testing.assert_array_equal(loaded["cids"], cids)
-        np.testing.assert_array_equal(loaded["thresholds"], thresholds)
-
     def test_evict_removes_memory_entry(self):
         arrays = {
             "embeddings": np.array([[1.0]], dtype=np.float32),

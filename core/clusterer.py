@@ -4,7 +4,7 @@ Returns base cluster state dicts ready to be saved to DB.
 """
 
 import numpy as np
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import hdbscan
 from sklearn.metrics.pairwise import cosine_distances, cosine_similarity
@@ -12,7 +12,6 @@ from sklearn.metrics.pairwise import cosine_distances, cosine_similarity
 from config import (
     HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES,
     N_REPRESENTATIVES, N_OUTLIER_SAMPLE,
-    SECONDARY_MEMBERSHIP_PERCENTILE, SECONDARY_MEMBERSHIP_FLOOR,
     SECONDARY_CENTROID_PERCENTILE,
 )
 
@@ -26,7 +25,6 @@ def run_hdbscan(
 ) -> Tuple[hdbscan.HDBSCAN, np.ndarray]:
     """
     Returns (fitted_clusterer, cluster_labels).
-    prediction_data=True is required for soft-membership vectors.
     gen_min_span_tree=True is required for exemplars_.
     """
     clusterer = hdbscan.HDBSCAN(
@@ -105,96 +103,6 @@ def build_base_cluster_list(labels: np.ndarray, unique_clusters: List[int]) -> L
         }
         for cid in unique_clusters
     ]
-
-
-# ── Soft membership ────────────────────────────────────────────────────────────
-
-def compute_soft_membership(
-    clusterer: hdbscan.HDBSCAN,
-    labels: np.ndarray,
-    named_clusters: List[int],
-    percentile: int = SECONDARY_MEMBERSHIP_PERCENTILE,
-    floor: float    = SECONDARY_MEMBERSHIP_FLOOR,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Returns:
-      membership   — float32 (n_points, n_named_clusters)
-      cids         — int32   (n_named_clusters,)  column → original HDBSCAN cluster id
-      thresholds   — float64 (n_named_clusters,)  per-cluster assignment threshold
-    """
-    membership = hdbscan.all_points_membership_vectors(clusterer)  # (n_pts, n_named)
-    cids       = np.array(named_clusters, dtype=np.int32)
-    thresholds = np.zeros(len(named_clusters), dtype=np.float64)
-    for col_idx, cid in enumerate(named_clusters):
-        primary_mask = labels == cid
-        if primary_mask.sum() > 0:
-            raw_pct = float(np.percentile(membership[primary_mask, col_idx], percentile))
-        else:
-            raw_pct = 1.0
-        thresholds[col_idx] = max(raw_pct, floor)
-    return membership.astype(np.float32), cids, thresholds
-
-
-def aggregate_membership_by_cluster(
-    membership: np.ndarray,
-    raw_cids: np.ndarray,
-    cluster_map: Dict[int, int] | None = None,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Collapse raw-cluster membership columns into canonical cluster columns via max."""
-    cluster_map = cluster_map or {}
-    grouped: Dict[int, List[int]] = {}
-    for col_idx, raw_cid in enumerate(raw_cids):
-        canonical_cid = int(cluster_map.get(int(raw_cid), int(raw_cid)))
-        grouped.setdefault(canonical_cid, []).append(col_idx)
-
-    canonical_cids = np.array(sorted(grouped), dtype=np.int32)
-    canonical_scores = np.zeros((membership.shape[0], len(canonical_cids)), dtype=np.float32)
-    for out_col, canonical_cid in enumerate(canonical_cids):
-        source_cols = grouped[int(canonical_cid)]
-        canonical_scores[:, out_col] = membership[:, source_cols].max(axis=1)
-    return canonical_scores, canonical_cids
-
-
-def compute_cluster_thresholds(
-    scores: np.ndarray,
-    labels: np.ndarray,
-    cids: np.ndarray,
-    percentile: int = SECONDARY_MEMBERSHIP_PERCENTILE,
-    floor: float = SECONDARY_MEMBERSHIP_FLOOR,
-) -> np.ndarray:
-    """Compute one threshold per cluster from all current primary members."""
-    thresholds = np.zeros(len(cids), dtype=np.float64)
-    for col_idx, cid in enumerate(cids):
-        primary_mask = labels == int(cid)
-        if primary_mask.sum() > 0:
-            raw_pct = float(np.percentile(scores[primary_mask, col_idx], percentile))
-        else:
-            raw_pct = 1.0
-        thresholds[col_idx] = max(raw_pct, floor)
-    return thresholds
-
-
-def assign_clusters_from_scores(
-    scores: np.ndarray,
-    cids: np.ndarray,
-    thresholds: np.ndarray,
-) -> Tuple[np.ndarray, Dict[int, List[Tuple[int, float]]]]:
-    """Assign each point to its best qualifying cluster and retain all qualifiers."""
-    labels = np.full(scores.shape[0], -1, dtype=np.int32)
-    qualifying_map: Dict[int, List[Tuple[int, float]]] = {}
-
-    for row_idx in range(scores.shape[0]):
-        qualifying = [
-            (int(cids[col_idx]), float(scores[row_idx, col_idx]))
-            for col_idx in range(len(cids))
-            if float(scores[row_idx, col_idx]) >= float(thresholds[col_idx])
-        ]
-        qualifying.sort(key=lambda item: item[1], reverse=True)
-        if qualifying:
-            labels[row_idx] = int(qualifying[0][0])
-            qualifying_map[row_idx] = qualifying
-
-    return labels, qualifying_map
 
 
 # ── Centroid cosine secondary assignment ──────────────────────────────────────

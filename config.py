@@ -60,17 +60,12 @@ HDBSCAN_MIN_SAMPLES      = 5
 # ── Representatives ───────────────────────────────────────────────────────────
 N_REPRESENTATIVES = 5
 N_OUTLIER_SAMPLE  = 2
-# ── Soft / secondary cluster membership ────────────────────────────────────────
-# Percentile of a cluster's primary members' soft scores used as the assignment
-# threshold for that cluster (higher = stricter).
-SECONDARY_MEMBERSHIP_PERCENTILE = 5
-# Absolute floor so noise clusters don't get thresholds near 0.
-SECONDARY_MEMBERSHIP_FLOOR      = 0.05
 # ── Centroid cosine secondary assignment ─────────────────────────────────────
 # Percentile of primary members' cosine similarity to cluster centroid used as
 # assignment threshold. Higher = stricter (fewer secondary assignments). 75 is
 # conservative — only points well within the cluster's similarity range qualify.
 SECONDARY_CENTROID_PERCENTILE   = 75
+EXPORT_CENTROID_THRESHOLD_MARGIN = 0.05
 # Hard cap: each point gets at most this many secondary cluster assignments
 # (i.e. a point belongs to primary + at most MAX_SECONDARY_CLUSTERS others).
 MAX_SECONDARY_CLUSTERS          = 3

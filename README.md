@@ -11,7 +11,7 @@ pinned: false
 
 An interactive Dash app for clustering open-ended survey responses with OpenAI embeddings, UMAP, HDBSCAN, and an editable review workflow.
 
-The app lets you upload a CSV, choose the ID and response columns, generate embeddings, cluster responses, inspect results in a 3D plot, and refine the output before export.
+The app lets you upload a CSV, choose the ID and response columns, generate embeddings, cluster responses, inspect results in a 3D plot, refine the cluster structure, and export a final workbook.
 
 ## At a Glance
 
@@ -22,10 +22,23 @@ flowchart LR
 	C --> D[OpenAI Embeddings]
 	D --> E[UMAP Projections]
 	E --> F[HDBSCAN Clustering]
-	F --> G[LLM Cluster Titles and Descriptions]
-	G --> H[Interactive Review and Edits]
-	H --> I[Excel Export]
+	F --> G[Optional Auto-Merge Suggestions]
+	G --> H[LLM Cluster Titles and Descriptions]
+	H --> I[Interactive Review and Edits]
+	I --> J[Export-Time Centroid Assignment]
+	J --> K[Excel Export]
 ```
+
+## Current Flow Summary
+
+The current clustering model is intentionally simple:
+
+- Phase 1 filters low-information responses, generates embeddings, and builds cached UMAP projections.
+- Phase 2 runs HDBSCAN on the active responses.
+- The editable working state is the raw HDBSCAN result after any auto-merges. There is no soft-membership reassignment layer in the live cluster state.
+- User actions such as join, split, rename, exclude, theme assignment, undo, and re-cluster are stored as edits and replayed into the current state.
+- Export runs one separate centroid-based refinement pass over the final edited active clusters using the original cached embeddings.
+- That export-only pass can absorb outliers and add secondary themes, but it does not change the interactive cluster view.
 
 ## App Flow
 
@@ -69,9 +82,10 @@ flowchart TD
 - Embeds active responses with OpenAI embedding models.
 - Builds both high-dimensional and 3D UMAP projections.
 - Runs HDBSCAN for cluster discovery.
+- Keeps merged HDBSCAN labels as the editable working cluster state.
 - Uses LLM summaries to name and describe clusters.
 - Supports post-cluster editing: join, split, rename, exclude, undo, and re-cluster.
-- Exports results to Excel, including optional secondary cluster assignments.
+- Exports results to Excel with an export-only centroid pass for outlier absorption and secondary theme assignment.
 
 ## Project Map
 
@@ -91,10 +105,12 @@ flowchart TD
 ## Key Files
 
 - `app.py`: initializes Dash, database setup, layout routing, and callback registration.
-- `config.py`: loads `.env`, defines model choices, cache/database paths, and algorithm tuning.
-- `callbacks/phase_controller.py`: orchestrates phase progression and background processing.
-- `core/clusterer.py`: HDBSCAN clustering, representative extraction, and secondary assignment helpers.
-- `core/cache.py`: persists and reloads generated arrays under `cache/`.
+- `config.py`: loads `.env`, defines model choices, cache/database paths, and clustering/export tuning.
+- `callbacks/phase_controller.py`: orchestrates phase progression and builds the live working cluster state from HDBSCAN plus auto-merges.
+- `callbacks/export.py`: builds the export workbook and runs the export-only centroid assignment pass.
+- `core/clusterer.py`: HDBSCAN clustering, representative extraction, and centroid threshold helpers.
+- `core/export_centroid.py`: export-only centroid-based outlier absorption and secondary theme assignment.
+- `core/cache.py`: persists and reloads embeddings and UMAP arrays under `cache/`.
 - `db/models.py`: SQLite schema for sessions, points, clusters, assignments, and edit history.
 
 ## Installation With uv
@@ -199,7 +215,7 @@ uv run python -m unittest tests.test_core_splitter.CoreSplitterTests
 
 The app creates local runtime data while you work:
 
-- `cache/`: embeddings, UMAP projections, membership matrices, centroids.
+- `cache/`: embeddings and UMAP projections.
 - `db/survey_clusters.db`: session metadata, points, cluster assignments, and edit history.
 
 These files are local artifacts and should not be committed.
@@ -219,10 +235,12 @@ sequenceDiagram
 	User->>DashApp: Start analysis
 	DashApp->>OpenAI: Filter and embed responses
 	DashApp->>Cache: Save embeddings and UMAP arrays
-	DashApp->>DB: Save clusters and assignments
+	DashApp->>DashApp: Run HDBSCAN and optional auto-merges
+	DashApp->>DB: Save working clusters and assignments
 	User->>DashApp: Review, rename, split, join, exclude
 	DashApp->>DB: Persist edit log
 	User->>DashApp: Export results
+	DashApp->>DashApp: Run centroid refinement for export only
 ```
 
 ## Notes
@@ -230,3 +248,4 @@ sequenceDiagram
 - The UI is built with Dash and Dash Bootstrap Components.
 - The app uses background tasks and interval polling so long-running phases do not block the interface.
 - Export produces an Excel workbook with a response sheet and a cluster summary sheet.
+- The interactive UI and the export workbook intentionally use different assignment layers: live editing uses HDBSCAN plus edits, while export adds a final centroid-based refinement pass.

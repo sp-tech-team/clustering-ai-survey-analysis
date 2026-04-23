@@ -2,17 +2,16 @@
 In-memory + on-disk cache for numpy arrays.
 
 Directory layout:
-    cache/{csv_hash}/{embedding_model}/
-      embeddings.npy
-      umap_high.npy
-      umap_3d.npy
+        cache/{csv_hash}/{embedding_model}/
+            embeddings.npy
+            umap_high.npy
+            umap_3d.npy
 
 The module-level dict `_mem` keeps arrays in RAM across requests so they
 are not re-read from disk on every callback. The cache is populated/read
 via load() and save(); everything else just calls get().
 """
 
-import json
 import threading
 from pathlib import Path
 from typing import Dict, Optional
@@ -85,46 +84,6 @@ def evict(csv_hash: str, embedding_model: str = EMBEDDING_MODEL) -> None:
     """Remove from memory cache (disk files are kept)."""
     with _lock:
         _mem.pop(_cache_id(csv_hash, embedding_model), None)
-
-
-# ── Unified membership cache (written once in phase 2) ───────────────────────
-# Files stored alongside the phase-1 arrays under the same hash directory:
-#   membership.npy            — float32 (n_active, n_canonical_clusters)
-#   membership_cids.npy       — int32   (n_canonical_clusters,) column→cluster_id
-#   membership_thresholds.npy — float64 (n_canonical_clusters,) per-cluster thresholds
-
-_MEM_KEYS = ("membership", "membership_cids", "membership_thresholds")
-
-
-def membership_exists(csv_hash: str, embedding_model: str = EMBEDDING_MODEL) -> bool:
-    d = _dir(csv_hash, embedding_model)
-    return all((d / f"{k}.npy").exists() for k in _MEM_KEYS)
-
-
-def save_membership(
-    csv_hash: str,
-    membership: np.ndarray,
-    cids: np.ndarray,
-    thresholds: np.ndarray,
-    embedding_model: str = EMBEDDING_MODEL,
-) -> None:
-    d = _dir(csv_hash, embedding_model)
-    d.mkdir(parents=True, exist_ok=True)
-    np.save(d / "membership.npy",            membership.astype(np.float32))
-    np.save(d / "membership_cids.npy",       cids.astype(np.int32))
-    np.save(d / "membership_thresholds.npy", thresholds.astype(np.float64))
-
-
-def load_membership(csv_hash: str, embedding_model: str = EMBEDDING_MODEL) -> Optional[Dict]:
-    """Returns dict with keys: membership, cids, thresholds."""
-    d = _dir(csv_hash, embedding_model)
-    if not membership_exists(csv_hash, embedding_model):
-        return None
-    return {
-        "membership":  np.load(d / "membership.npy"),
-        "cids":        np.load(d / "membership_cids.npy"),
-        "thresholds":  np.load(d / "membership_thresholds.npy"),
-    }
 
 
 # ── Centroid cosine cache (written once in phase 2) ───────────────────────────

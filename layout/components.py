@@ -170,14 +170,14 @@ def export_confirm_modal() -> dbc.Modal:
         dbc.ModalHeader(dbc.ModalTitle("Export Clusters")),
         dbc.ModalBody([
             html.P(
-                "The exported workbook always includes secondary cluster memberships when they qualify.",
+                "Before download, the export runs a final centroid-similarity pass on the edited active clusters.",
                 className="mb-1",
             ),
             html.P(
-                "Primary and secondary memberships are replayed from the unified clustering model. "
-                "This only affects the exported file — the cluster view is unchanged.",
+                "Current primary clusters stay fixed. This export-only pass can absorb outliers and add secondary themes when they clear each cluster's similarity threshold.",
                 className="text-muted small",
             ),
+            html.Div(id="export-preview-content", className="mt-3"),
         ]),
         dbc.ModalFooter([
             dbc.Button("Cancel",   id="export-cancel",  color="secondary", className="me-2"),

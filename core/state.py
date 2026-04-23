@@ -7,8 +7,8 @@ Never persisted directly; reconstructed on every load (takes < 1 s).
 Edit payloads (stored in DB cluster_edits.payload):
 
   join    : {from_ids, to_id, title, description, sentiment}
-  split   : {from_id, new_assignments: [[point_idx, new_cid], …],
-             new_cluster_info: {str(cid): {title, description, sentiment}}}
+    split   : {from_id, new_assignments: [[point_idx, new_cid], …],
+                         new_cluster_info: {str(cid): {title, description, sentiment}}}
   rename  : {cluster_id, title, description}
   exclude : {cluster_id, reason}          → is_active=False, status="excluded"
   unexclude: {cluster_id}                 → is_active=True

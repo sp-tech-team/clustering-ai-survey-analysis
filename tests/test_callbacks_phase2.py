@@ -8,7 +8,7 @@ from callbacks.phase2 import assign_other_themes, do_split, render_cluster_list
 
 
 class Phase2CallbackTests(unittest.TestCase):
-    def test_do_split_logs_local_membership_payload(self):
+    def test_do_split_logs_basic_split_payload(self):
         session = SimpleNamespace(csv_hash="hash123", embedding_model="model", api_key="key")
         arrays = {
             "point_ids": np.array([1, 2, 3, 4, 5, 6], dtype=np.int32),
@@ -24,8 +24,6 @@ class Phase2CallbackTests(unittest.TestCase):
         split_result = (
             {0: 100, 1: 100, 2: 100, 3: 101, 4: 101, 5: 101},
             [100, 101],
-            {0: [(100, 1.0), (101, 0.7)], 3: [(101, 0.95)]},
-            {100: 0.6, 101: 0.65},
         )
 
         with mock.patch("callbacks.phase2.get_session", return_value=session), \
@@ -47,8 +45,8 @@ class Phase2CallbackTests(unittest.TestCase):
         self.assertIn("split into 2 sub-clusters", message)
 
         payload = log_edit.call_args.args[2]
-        self.assertEqual(payload["local_qualifying"]["0"][0], [100, 1.0])
-        self.assertEqual(payload["local_thresholds"]["101"], 0.65)
+        self.assertEqual(payload["new_assignments"][0], [0, 100])
+        self.assertNotIn("local_qualifying", payload)
 
     def test_do_split_requires_exactly_one_cluster(self):
         refresh, title, message, is_open = do_split(1, "session-1", {"selected_cluster_ids": [1, 2]}, 0)
@@ -98,8 +96,6 @@ class Phase2CallbackTests(unittest.TestCase):
              mock.patch("callbacks.phase2.get_cluster_assignments", return_value=assignments), \
              mock.patch("callbacks.phase2.reconstruct", return_value=fake_state), \
              mock.patch("callbacks.phase2.get_session", return_value=session), \
-             mock.patch("callbacks.phase2.load_membership", return_value=None), \
-             mock.patch("callbacks.phase2.replay_secondary_memberships", return_value=({}, {"assigned_points": 2, "active_points": 3, "outliers_remaining": 1, "points_with_secondaries": 0, "total_secondary_links": 0, "max_secondary_links": 0, "membership_available": False, "cached_cluster_count": 0})), \
              mock.patch("callbacks.phase2.get_points", return_value=points):
             list_group, count_badge, _ = render_cluster_list(1, "session-1", {"selected_cluster_ids": []})
 

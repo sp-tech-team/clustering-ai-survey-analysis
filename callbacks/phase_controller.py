@@ -368,11 +368,8 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         from openai import OpenAI
         from core.clusterer import (
             run_hdbscan, extract_representatives, build_base_cluster_list,
-            compute_soft_membership, aggregate_membership_by_cluster,
-            compute_cluster_thresholds, assign_clusters_from_scores,
         )
         from core.llm import summarise_all_clusters, summarise_cluster, suggest_merges
-        from core.cache import save_membership as cache_save_membership
 
         client = OpenAI(api_key=api_key)
         sess   = get_session(session_id)
@@ -401,19 +398,11 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         tasks.update_progress(session_id, 10, "Running HDBSCAN…")
         clusterer, labels = run_hdbscan(umap_high)
 
-        # Compute soft membership immediately after HDBSCAN on the original labels
-        # (before any merging so column indices align with raw HDBSCAN cluster IDs).
-        tasks.update_progress(session_id, 22, "Computing soft membership vectors…")
         unique_clusters    = [c for c in sorted(set(labels)) if c != -1]
         n_hdbscan_clusters = len(unique_clusters)
         n_raw_outliers     = int(np.sum(labels == -1))
         tasks.mark_step_done(session_id, "HDBSCAN",
                              f"{n_hdbscan_clusters} clusters, {n_raw_outliers} outliers")
-        membership, mem_cids, _ = compute_soft_membership(
-            clusterer, labels, unique_clusters
-        )
-        tasks.mark_step_done(session_id, "Soft membership",
-                             f"{membership.shape[1]} raw cluster score columns")
 
         tasks.update_progress(session_id, 30, "Extracting representatives…")
         reps = extract_representatives(clusterer, labels, umap_high,
@@ -473,32 +462,9 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
             [final_merge_map.get(int(l), int(l)) if int(l) != -1 else -1 for l in labels],
             dtype=np.int32,
         )
-        canonical_membership, canonical_cids = aggregate_membership_by_cluster(
-            membership,
-            mem_cids,
-            final_merge_map,
-        )
-        canonical_thresholds = compute_cluster_thresholds(
-            canonical_membership,
-            canonical_labels,
-            canonical_cids,
-        )
-        threshold_min = float(np.min(canonical_thresholds)) if len(canonical_thresholds) else 0.0
-        threshold_median = float(np.median(canonical_thresholds)) if len(canonical_thresholds) else 0.0
-        threshold_max = float(np.max(canonical_thresholds)) if len(canonical_thresholds) else 0.0
-        tasks.mark_step_done(
-            session_id,
-            "Membership thresholds",
-            f"{len(canonical_cids)} clusters; min {threshold_min:.3f}, median {threshold_median:.3f}, max {threshold_max:.3f}",
-        )
-
-        tasks.update_progress(session_id, 41, "Assigning primary and secondary memberships…")
-        labels, qualifying_map = assign_clusters_from_scores(
-            canonical_membership,
-            canonical_cids,
-            canonical_thresholds,
-        )
-        base_list = build_base_cluster_list(labels, [int(cid) for cid in canonical_cids])
+        canonical_cluster_ids = [int(cid) for cid in sorted(set(canonical_labels)) if int(cid) != -1]
+        labels = canonical_labels
+        base_list = build_base_cluster_list(labels, canonical_cluster_ids)
 
         n_absorbed = n_before_merge - len(base_list)
         if n_absorbed > 0:
@@ -508,13 +474,11 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
             tasks.mark_step_done(session_id, "Auto-merge", "no merges needed")
 
         n_assigned = int(np.sum(labels != -1))
-        n_with_secondaries = sum(1 for quals in qualifying_map.values() if len(quals) > 1)
-        total_secondary_links = sum(max(len(quals) - 1, 0) for quals in qualifying_map.values())
         n_outliers_final = int(np.sum(labels == -1))
         tasks.mark_step_done(
             session_id,
-            "Unified assignment",
-            f"{n_assigned} assigned, {n_outliers_final} outliers, {n_with_secondaries} points with secondaries, {total_secondary_links} secondary links",
+            "Working state",
+            f"{n_assigned} assigned, {n_outliers_final} outliers, {len(base_list)} active clusters",
         )
 
         # ── LLM labelling of (merged) clusters — single batched call ─────────
@@ -558,15 +522,6 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         save_clusters(session_id, labelled)
         assignments = [(pt.id, int(lbl)) for pt, lbl in zip(active_pts_ordered, labels)]
         save_cluster_assignments(session_id, assignments)
-
-        # Persist canonical membership matrix for export replay and edit handling.
-        cache_save_membership(
-            sess.csv_hash,
-            canonical_membership,
-            canonical_cids,
-            canonical_thresholds,
-            embedding_model=embedding_model,
-        )
 
         tasks.mark_step_done(session_id, "Clusters",
                              f"{len(labelled)} clusters, {n_outliers_final} outliers remaining")
