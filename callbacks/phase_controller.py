@@ -367,7 +367,7 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
         import numpy as np
         from openai import OpenAI
         from core.clusterer import (
-            run_hdbscan, extract_representatives, build_base_cluster_list,
+            choose_hdbscan_params, run_hdbscan, extract_representatives, build_base_cluster_list,
         )
         from core.llm import summarise_all_clusters, summarise_cluster, suggest_merges
 
@@ -394,15 +394,30 @@ def _phase2_worker(session_id: str, api_key: str) -> None:
 
         idx_to_text = {i: p.response_text for i, p in enumerate(active_pts_ordered)}
         total       = len(active_pts_ordered)
+        min_cluster_size, min_samples = choose_hdbscan_params(total)
 
-        tasks.update_progress(session_id, 10, "Running HDBSCAN…")
-        clusterer, labels = run_hdbscan(umap_high)
+        tasks.update_progress(
+            session_id,
+            10,
+            f"Running HDBSCAN (min_cluster_size={min_cluster_size}, min_samples={min_samples})…",
+        )
+        clusterer, labels = run_hdbscan(
+            umap_high,
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+        )
 
         unique_clusters    = [c for c in sorted(set(labels)) if c != -1]
         n_hdbscan_clusters = len(unique_clusters)
         n_raw_outliers     = int(np.sum(labels == -1))
-        tasks.mark_step_done(session_id, "HDBSCAN",
-                             f"{n_hdbscan_clusters} clusters, {n_raw_outliers} other-themes points")
+        tasks.mark_step_done(
+            session_id,
+            "HDBSCAN",
+            (
+                f"min_cluster_size={min_cluster_size}, min_samples={min_samples}; "
+                f"{n_hdbscan_clusters} clusters, {n_raw_outliers} other-themes points"
+            ),
+        )
 
         tasks.update_progress(session_id, 30, "Extracting representatives…")
         reps = extract_representatives(clusterer, labels, umap_high,

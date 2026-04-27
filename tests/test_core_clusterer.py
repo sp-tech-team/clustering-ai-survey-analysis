@@ -4,11 +4,21 @@ import numpy as np
 
 from core.clusterer import (
     build_base_cluster_list,
+    choose_hdbscan_params,
     compute_centroid_thresholds,
 )
 
 
 class CoreClustererTests(unittest.TestCase):
+    def test_choose_hdbscan_params_uses_sqrt_rule_and_low_min_samples(self):
+        self.assertEqual(choose_hdbscan_params(100), (10, 2))
+        self.assertEqual(choose_hdbscan_params(400), (20, 4))
+        self.assertEqual(choose_hdbscan_params(900), (30, 5))
+
+    def test_choose_hdbscan_params_rejects_non_positive_counts(self):
+        with self.assertRaises(ValueError):
+            choose_hdbscan_params(0)
+
     def test_build_base_cluster_list_counts_points(self):
         labels = np.array([0, 0, 1, -1], dtype=np.int32)
         result = build_base_cluster_list(labels, [0, 1, -1])

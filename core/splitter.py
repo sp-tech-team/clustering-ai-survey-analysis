@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 import hdbscan
 
-from config import HDBSCAN_MIN_SAMPLES
+from core.clusterer import choose_hdbscan_params
 
 
 def split_cluster(
@@ -25,11 +25,11 @@ def split_cluster(
         raise ValueError("Cluster too small to split (need ≥ 4 points).")
 
     sub_emb = umap_high[point_indices]
-    min_cs  = max(3, len(point_indices) // 5)
+    min_cs, min_samples = choose_hdbscan_params(len(point_indices))
 
     sub_clusterer = hdbscan.HDBSCAN(
         min_cluster_size=min_cs,
-        min_samples=min(HDBSCAN_MIN_SAMPLES, min_cs),
+        min_samples=min_samples,
         metric="euclidean",
         cluster_selection_method="eom",
         gen_min_span_tree=True,

@@ -3,6 +3,7 @@ HDBSCAN clustering + exemplar-based representative extraction.
 Returns base cluster state dicts ready to be saved to DB.
 """
 
+import math
 import numpy as np
 from typing import Dict, List, Tuple
 
@@ -10,7 +11,10 @@ import hdbscan
 from sklearn.metrics.pairwise import cosine_distances, cosine_similarity
 
 from config import (
-    HDBSCAN_MIN_CLUSTER_SIZE, HDBSCAN_MIN_SAMPLES,
+    HDBSCAN_MIN_CLUSTER_SIZE_FLOOR,
+    HDBSCAN_MIN_SAMPLES_CAP,
+    HDBSCAN_MIN_SAMPLES_FLOOR,
+    HDBSCAN_MIN_SAMPLES_SQRT_RATIO,
     N_REPRESENTATIVES, N_OUTLIER_SAMPLE,
     SECONDARY_CENTROID_PERCENTILE,
 )
@@ -18,15 +22,37 @@ from config import (
 
 # ── HDBSCAN ───────────────────────────────────────────────────────────────────
 
+def choose_hdbscan_params(n_points: int) -> Tuple[int, int]:
+    """
+    Choose HDBSCAN parameters from the active point count.
+
+    min_cluster_size follows a square-root rule so expected theme size scales
+    with survey size. min_samples stays deliberately low to allow looser
+    clusters and reduce raw outliers in the interactive state.
+    """
+    if n_points <= 0:
+        raise ValueError("n_points must be positive")
+
+    min_cluster_size = max(HDBSCAN_MIN_CLUSTER_SIZE_FLOOR, math.ceil(math.sqrt(n_points)))
+    min_samples = math.ceil(HDBSCAN_MIN_SAMPLES_SQRT_RATIO * math.sqrt(n_points))
+    min_samples = max(HDBSCAN_MIN_SAMPLES_FLOOR, min(HDBSCAN_MIN_SAMPLES_CAP, min_samples))
+    min_samples = min(min_samples, min_cluster_size)
+    return min_cluster_size, min_samples
+
 def run_hdbscan(
     umap_high: np.ndarray,
-    min_cluster_size: int = HDBSCAN_MIN_CLUSTER_SIZE,
-    min_samples: int = HDBSCAN_MIN_SAMPLES,
+    min_cluster_size: int | None = None,
+    min_samples: int | None = None,
 ) -> Tuple[hdbscan.HDBSCAN, np.ndarray]:
     """
     Returns (fitted_clusterer, cluster_labels).
     gen_min_span_tree=True is required for exemplars_.
     """
+    if min_cluster_size is None or min_samples is None:
+        adaptive_min_cluster_size, adaptive_min_samples = choose_hdbscan_params(len(umap_high))
+        min_cluster_size = adaptive_min_cluster_size if min_cluster_size is None else min_cluster_size
+        min_samples = adaptive_min_samples if min_samples is None else min_samples
+
     clusterer = hdbscan.HDBSCAN(
         min_cluster_size=min_cluster_size,
         min_samples=min_samples,

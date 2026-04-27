@@ -54,8 +54,10 @@ UMAP_MIN_DIST          = 0.0
 UMAP_N_EPOCHS          = 200
 
 # ── HDBSCAN ───────────────────────────────────────────────────────────────────
-HDBSCAN_MIN_CLUSTER_SIZE = 15
-HDBSCAN_MIN_SAMPLES      = 5
+HDBSCAN_MIN_CLUSTER_SIZE_FLOOR = 5
+HDBSCAN_MIN_SAMPLES_FLOOR      = 2
+HDBSCAN_MIN_SAMPLES_CAP        = 5
+HDBSCAN_MIN_SAMPLES_SQRT_RATIO = 0.2
 
 # ── Representatives ───────────────────────────────────────────────────────────
 N_REPRESENTATIVES = 5
