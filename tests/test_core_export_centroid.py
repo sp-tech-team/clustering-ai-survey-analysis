@@ -67,3 +67,32 @@ class ExportCentroidTests(unittest.TestCase):
         self.assertEqual(export_labels.tolist(), [10, 20])
         self.assertEqual(secondary_map, {})
         self.assertEqual(diagnostics["outliers_absorbed"], 0)
+
+    def test_centroid_uses_core_members_only_for_cluster_shape(self):
+        labels = np.array([10, 10, 10, 20], dtype=np.int32)
+        embeddings = np.array(
+            [
+                [1.0, 0.0],
+                [0.98, 0.02],
+                [0.0, 1.0],
+                [0.99, 0.01],
+            ],
+            dtype=np.float32,
+        )
+        state = SimpleNamespace(
+            active_ids=[10, 20],
+            info={10: SimpleNamespace(is_active=True), 20: SimpleNamespace(is_active=True)},
+        )
+
+        export_labels, secondary_map, diagnostics = compute_export_centroid_assignments(
+            embeddings,
+            labels,
+            state,
+            percentile=50,
+            threshold_margin=0.0,
+            core_member_ratio=0.66,
+        )
+
+        self.assertEqual(export_labels.tolist(), [10, 10, 10, 20])
+        self.assertEqual(secondary_map[3], [10])
+        self.assertTrue(diagnostics["available"])

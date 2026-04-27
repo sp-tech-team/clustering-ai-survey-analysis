@@ -4,7 +4,12 @@ from typing import Dict, List
 
 import numpy as np
 
-from config import SECONDARY_CENTROID_PERCENTILE, EXPORT_CENTROID_THRESHOLD_MARGIN, MAX_SECONDARY_CLUSTERS
+from config import (
+    SECONDARY_CENTROID_PERCENTILE,
+    EXPORT_CENTROID_CORE_MEMBER_RATIO,
+    EXPORT_CENTROID_THRESHOLD_MARGIN,
+    MAX_SECONDARY_CLUSTERS,
+)
 
 
 def _normalize_rows(vectors: np.ndarray) -> np.ndarray:
@@ -20,6 +25,28 @@ def _normalize_vector(vector: np.ndarray) -> np.ndarray:
     return vector / norm
 
 
+def _refine_centroid_from_core_members(
+    normalized: np.ndarray,
+    member_idx: np.ndarray,
+    core_member_ratio: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    centroid = _normalize_vector(normalized[member_idx].mean(axis=0))
+    if not np.any(centroid):
+        return centroid, member_idx
+
+    keep_count = max(1, int(np.ceil(len(member_idx) * float(core_member_ratio))))
+    if keep_count >= len(member_idx):
+        return centroid, member_idx
+
+    member_scores = normalized[member_idx] @ centroid
+    top_order = np.argsort(member_scores)[::-1][:keep_count]
+    core_idx = member_idx[top_order]
+    refined = _normalize_vector(normalized[core_idx].mean(axis=0))
+    if not np.any(refined):
+        return centroid, core_idx
+    return refined, core_idx
+
+
 def compute_export_centroid_assignments(
     embeddings: np.ndarray | None,
     labels: np.ndarray,
@@ -27,6 +54,7 @@ def compute_export_centroid_assignments(
     max_secondary_clusters: int = MAX_SECONDARY_CLUSTERS,
     percentile: int = SECONDARY_CENTROID_PERCENTILE,
     threshold_margin: float = EXPORT_CENTROID_THRESHOLD_MARGIN,
+    core_member_ratio: float = EXPORT_CENTROID_CORE_MEMBER_RATIO,
 ) -> tuple[np.ndarray, Dict[int, List[int]], dict]:
     export_labels = labels.copy().astype(np.int32)
     secondary_map: Dict[int, List[int]] = {}
@@ -65,13 +93,17 @@ def compute_export_centroid_assignments(
         if len(primary_idx) == 0:
             continue
 
-        centroid = _normalize_vector(normalized[primary_idx].mean(axis=0))
+        centroid, core_idx = _refine_centroid_from_core_members(
+            normalized,
+            primary_idx,
+            core_member_ratio,
+        )
         if not np.any(centroid):
             continue
 
         sims = normalized @ centroid
         similarities[:, col_idx] = sims.astype(np.float32)
-        raw_threshold = float(np.percentile(sims[primary_idx], percentile))
+        raw_threshold = float(np.percentile(sims[core_idx], percentile))
         thresholds[col_idx] = max(-1.0, min(1.0, raw_threshold - float(threshold_margin)))
 
     valid_thresholds = thresholds[np.isfinite(thresholds)]
